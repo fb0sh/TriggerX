@@ -14,6 +14,7 @@ A lightweight task scheduler with email notifications, built on <a href="https:/
 ![React](https://img.shields.io/badge/React-20232a.svg?logo=react&logoColor=61DAFB)
 ![Primer](https://img.shields.io/badge/Primer-0969DA?logo=github&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+[![Pages](https://github.com/fb0sh/TriggerX/actions/workflows/pages.yml/badge.svg)](https://github.com/fb0sh/TriggerX/actions/workflows/pages.yml)
 ![Cross-Platform](https://img.shields.io/badge/Cross--Platform-macOS%20%7C%20Windows%20%7C%20Linux-brightgreen)
 [![Release](https://github.com/fb0sh/TriggerX/actions/workflows/release.yml/badge.svg)](https://github.com/fb0sh/TriggerX/actions/workflows/release.yml)
 

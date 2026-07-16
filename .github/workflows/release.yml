@@ -5,7 +5,7 @@
 #   Push tag: v*
 #
 # Outputs:
-#   macOS   -> .dmg (Apple Silicon + Intel)
+#   macOS   -> .dmg (Apple Silicon)
 #   Windows -> NSIS (.exe)
 #   Linux   -> .deb / .rpm / .AppImage
 # =============================================================================
@@ -32,16 +32,7 @@ jobs:
   # macOS
   # ===========================================================================
   macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            runner: macos-14
-          - arch: x86_64
-            runner: macos-13
-
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14
     timeout-minutes: 45
 
     steps:
@@ -69,7 +60,7 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-macos-${{ matrix.arch }}
+          name: ${{ env.APP_NAME }}-macos
           path: src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
