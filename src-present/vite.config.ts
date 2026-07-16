@@ -14,6 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@tauri-apps/api/core": resolve(__dirname, "tauri-mocks.ts"),
+      "@tauri-apps/api/event": resolve(__dirname, "tauri-mocks.ts"),
       "@tauri-apps/plugin-notification": resolve(__dirname, "tauri-mocks.ts"),
       "@tauri-apps/plugin-opener": resolve(__dirname, "tauri-mocks.ts"),
     },

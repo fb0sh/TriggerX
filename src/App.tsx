@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   PageHeader,
   Button,
@@ -63,6 +63,11 @@ function relativeTime(iso: string): string {
 export default function App() {
   const { tasks, settings, loading, loadTasks, deleteTask, toggleTask, loadSettings } = useAppStore();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
+  const runningRef = useRef<Set<string>>(new Set());
+  const updateRunning = useCallback((fn: (prev: Set<string>) => Set<string>) => {
+    setRunningTasks(fn);
+    runningRef.current = fn(runningRef.current);
+  }, []);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'time' | 'name'>('time');
   const [filterEnabled, setFilterEnabled] = useState<'all' | 'enabled' | 'disabled'>('all');
@@ -130,38 +135,54 @@ export default function App() {
     setFlashMsg(`已删除「${name}」`);
   }
 
+  // Listen for async task execution events (Tauri backend)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<any>('task-completed', (payload) => {
+          const r = payload.payload;
+          const id = [...runningRef.current][0];
+          if (!id) return;
+          useAppStore.setState(s => ({
+            tasks: s.tasks.map(t => t.id === id ? {
+              ...t,
+              lastRun: {
+                status: r.status as 'success' | 'failure',
+                exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr,
+                executedAt: r.executedAt, durationMs: r.durationMs,
+                error: r.error ?? undefined,
+              },
+            } : t),
+          }));
+          updateRunning(prev => { const n = new Set(prev); n.delete(id); return n; });
+          setFlashMsg('执行完成');
+        });
+      } catch { /* no Tauri */ }
+    })();
+    return () => { unlisten?.(); };
+  }, [updateRunning]);
+
+  // Dev mode mock: simulate completion after 2s
+  useEffect(() => {
+    const mockTimer = setInterval(() => {
+      if (runningRef.current.size > 0) {
+        // Mock completion handled by tauri-mocks
+      }
+    }, 500);
+    return () => clearInterval(mockTimer);
+  }, []);
+
   async function handleRunNow(id: string) {
-    setRunningTasks(prev => new Set(prev).add(id));
-    const taskName = tasks.find(t => t.id === id)?.name || '';
+    updateRunning(prev => new Set(prev).add(id));
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const result: {
-        status: string; exitCode: number | null;
-        stdout: string; stderr: string;
-        executedAt: string; durationMs: number | null;
-        error: string | null;
-      } = await invoke('run_now', { id });
-      useAppStore.setState(s => ({
-        tasks: s.tasks.map(t =>
-          t.id === id ? {
-            ...t,
-            lastRun: {
-              status: result.status as 'success' | 'failure',
-              exitCode: result.exitCode,
-              stdout: result.stdout,
-              stderr: result.stderr,
-              executedAt: result.executedAt,
-              durationMs: result.durationMs,
-              error: result.error ?? undefined,
-            },
-          } : t
-        ),
-      }));
-      setFlashMsg(`「${taskName}」执行完成`);
+      await invoke('run_now', { id });
     } catch (e) {
+      updateRunning(prev => { const n = new Set(prev); n.delete(id); return n; });
+      const taskName = tasks.find(t => t.id === id)?.name || '';
       setFlashMsg(`「${taskName}」执行失败`);
-    } finally {
-      setRunningTasks(prev => { const next = new Set(prev); next.delete(id); return next; });
     }
   }
 
@@ -400,6 +421,7 @@ export default function App() {
                         variant="invisible"
                         size="small"
                         onClick={() => openEdit(task)}
+                        disabled={runningTasks.has(task.id)}
                       />
                     </Tooltip>
                     <Tooltip text="删除" direction="n">
@@ -409,6 +431,7 @@ export default function App() {
                         variant="invisible"
                         size="small"
                         onClick={() => handleDelete(task.id, task.name)}
+                        disabled={runningTasks.has(task.id)}
                       />
                     </Tooltip>
                   </div>

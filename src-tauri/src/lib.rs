@@ -8,6 +8,7 @@ mod scheduler;
 use db::Database;
 use std::sync::Arc;
 use executor::TestRunResult;
+use tauri::Emitter;
 use tauri::{
     menu::{MenuBuilder, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -106,63 +107,72 @@ fn test_run_task(
 }
 
 #[tauri::command]
-fn run_now(id: String, db: tauri::State<'_, Arc<Database>>, app: tauri::AppHandle) -> Result<db::RunResult, String> {
-    let task = db.get_task(&id)?.ok_or(format!("Task {id} not found"))?;
-    let now = chrono::Utc::now();
+fn run_now(id: String, db: tauri::State<'_, Arc<Database>>, app: tauri::AppHandle) -> Result<(), String> {
+    let db_clone = db.inner().clone();
+    let app_clone = app.clone();
+    let task_id = id.clone();
 
-    let start = std::time::Instant::now();
-    let (code, stdout, stderr) = executor::execute_task(&task);
-    let duration = start.elapsed().as_millis() as i64;
+    // Emit running state immediately
+    let _ = app.emit("task-running", serde_json::json!({"id": &id}));
 
-    let run_result = db::RunResult {
-        status: if code == 0 { "success".into() } else { "failure".into() },
-        exit_code: Some(code),
-        stdout,
-        stderr,
-        executed_at: now.to_rfc3339(),
-        duration_ms: Some(duration),
-        error: if code != 0 { Some("Exit code non-zero".into()) } else { None },
-    };
+    std::thread::spawn(move || {
+        let task = match db_clone.get_task(&task_id) {
+            Ok(Some(t)) => t,
+            _ => { let _ = app_clone.emit("task-error", serde_json::json!({"id": &task_id, "error": "Task not found"})); return; }
+        };
+        let now = chrono::Utc::now();
 
-    // Persist result without affecting schedule
-    let mut updated = task.clone();
-    updated.run_count += 1;
-    updated.last_run = Some(serde_json::to_value(&run_result).unwrap_or_default());
-    updated.updated_at = now.to_rfc3339();
-    db.update_task(&updated)?;
+        let start = std::time::Instant::now();
+        let (code, stdout, stderr) = executor::execute_task(&task);
+        let duration = start.elapsed().as_millis() as i64;
 
-    // Record execution log
-    let _ = db.insert_log(
-        &id, &run_result.status, run_result.exit_code,
-        &run_result.stdout, &run_result.stderr,
-        &run_result.executed_at, run_result.duration_ms,
-        run_result.error.as_deref(), "manual");
+        let run_result = db::RunResult {
+            status: if code == 0 { "success".into() } else { "failure".into() },
+            exit_code: Some(code),
+            stdout,
+            stderr,
+            executed_at: now.to_rfc3339(),
+            duration_ms: Some(duration),
+            error: if code != 0 { Some("Exit code non-zero".into()) } else { None },
+        };
 
-    // System notification
-    if task.notify_system.unwrap_or(true) {
-        let fail_only = task.notify_system_on_failure_only.unwrap_or(false);
-        if !fail_only || code != 0 {
-            let _ = crate::notifier::send_notification(&app, &task, &run_result);
+        // Persist
+        let mut updated = task.clone();
+        updated.run_count += 1;
+        updated.last_run = Some(serde_json::to_value(&run_result).unwrap_or_default());
+        updated.updated_at = now.to_rfc3339();
+        let _ = db_clone.update_task(&updated);
+        let _ = db_clone.insert_log(&task_id, &run_result.status, run_result.exit_code,
+            &run_result.stdout, &run_result.stderr, &run_result.executed_at,
+            run_result.duration_ms, run_result.error.as_deref(), "manual");
+
+        // Notifications
+        if task.notify_system.unwrap_or(true) {
+            let fail_only = task.notify_system_on_failure_only.unwrap_or(false);
+            if !fail_only || code != 0 {
+                let _ = crate::notifier::send_notification(&app_clone, &task, &run_result);
+            }
         }
-    }
-
-    // Email notification
-    if task.notify_email.unwrap_or(false) {
-        let fail_only = task.notify_email_on_failure_only.unwrap_or(false);
-        if !fail_only || code != 0 {
-            if let Some(ref to) = task.notify_email_to {
-                if !to.is_empty() {
-                    if let Ok(settings) = db.get_settings() {
-                        if let Some(ref smtp) = settings.smtp {
-                            let _ = mailer::send_email(smtp, to, &task, &run_result);
+        if task.notify_email.unwrap_or(false) {
+            let fail_only = task.notify_email_on_failure_only.unwrap_or(false);
+            if !fail_only || code != 0 {
+                if let Some(ref to) = task.notify_email_to {
+                    if !to.is_empty() {
+                        if let Ok(settings) = db_clone.get_settings() {
+                            if let Some(ref smtp) = settings.smtp {
+                                let _ = mailer::send_email(smtp, to, &task, &run_result);
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    Ok(run_result)
+        // Emit completion
+        let _ = app_clone.emit("task-completed", serde_json::to_value(&run_result).unwrap_or_default());
+    });
+
+    Ok(())
 }
 
 #[tauri::command]

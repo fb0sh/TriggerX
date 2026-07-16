@@ -185,6 +185,36 @@ async function invoke(command: string, args?: Record<string, any>): Promise<any>
 export { invoke };
 export default { invoke };
 
+/* ─── Event mock ─────────────────────────────────────────────────────── */
+
+type Listener = (event: { payload: any }) => void;
+const eventListeners = new Map<string, Set<Listener>>();
+
+export async function listen(event: string, handler: Listener): Promise<() => void> {
+  if (!eventListeners.has(event)) eventListeners.set(event, new Set());
+  eventListeners.get(event)!.add(handler);
+  return () => { eventListeners.get(event)?.delete(handler); };
+}
+
+// Auto-trigger task-completed 2s after run_now
+const origInvoke = invoke;
+invoke = async function(command: string, args?: Record<string, any>) {
+  const result = await origInvoke(command, args);
+  if (command === 'run_now') {
+    setTimeout(() => {
+      const listeners = eventListeners.get('task-completed');
+      if (listeners) {
+        const mockResult = {
+          status: 'success', exitCode: 0, stdout: 'Task completed', stderr: '',
+          executedAt: new Date().toISOString(), durationMs: 1500, error: null,
+        };
+        listeners.forEach(fn => fn({ payload: mockResult }));
+      }
+    }, 2000);
+  }
+  return result;
+};
+
 /* ─── Plugin mocks ──────────────────────────────────────────────────── */
 
 export async function isPermissionGranted() { return true; }
