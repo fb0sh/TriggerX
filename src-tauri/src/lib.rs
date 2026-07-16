@@ -110,8 +110,9 @@ fn run_now(id: String, db: tauri::State<'_, Arc<Database>>, app: tauri::AppHandl
         let (code, stdout, stderr) = executor::execute_task(&task);
         let duration = start.elapsed().as_millis() as i64;
 
-        let _ = executor::persist_and_notify(&task, code, stdout, stderr, duration, "manual", &db_clone, &app_clone);
-        let _ = app_clone.emit("task-completed", serde_json::json!({"id": &id}));
+        let r = executor::persist_and_notify(&task, code, stdout, stderr, duration, "manual", &db_clone, &app_clone);
+        match r { Ok(run_result) => { let _ = app_clone.emit("task-completed", serde_json::to_value(&run_result).unwrap_or_default()); } Err(e) => { eprintln!("[triggerx] run_now error: {e}"); } }
+        
     });
     Ok(())
 }

@@ -52,7 +52,7 @@ pub fn persist_and_notify(
     trigger: &str,
     db: &Database,
     app: &tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<RunResult, String> {
     use chrono::Utc;
     let now = Utc::now();
 
@@ -106,7 +106,7 @@ pub fn persist_and_notify(
         }
     }
 
-    Ok(())
+    Ok(run_result)
 }
 
 /// Check which language runtimes are available on this machine.
