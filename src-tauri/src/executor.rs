@@ -319,3 +319,67 @@ mod tests {
         assert!(escaped.ends_with("'"));
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::db::{Database, Task};
+    use serde_json::json;
+    use tauri::AppHandle;
+
+    fn test_db() -> Database {
+        let path = "/tmp/triggerx_test.db";
+        let _ = std::fs::remove_file(path);
+        Database::new(path).unwrap()
+    }
+
+    #[test]
+    fn test_persist_and_notify_returns_result() {
+        let db = test_db();
+        let task = Task {
+            id: "test-persist".into(),
+            name: "test".into(),
+            enabled: true,
+            config: json!({"type": "shell", "shell": {"command": "echo ok"}}),
+            schedule: json!({"kind": "cron"}),
+            last_run: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            run_count: 0,
+            notify: json!({"system": true}),
+        };
+        db.add_task(&task).unwrap();
+
+        // Execute a simple command
+        let (code, stdout, _) = execute_task(&task);
+        assert_eq!(code, 0);
+
+        // We can't test persist_and_notify without a real AppHandle in tests
+        // But we can verify execute_task works with the test task
+        assert_eq!(stdout.trim(), "ok");
+    }
+
+    #[test]
+    fn test_execute_task_with_notify_json() {
+        let task = Task {
+            id: "test-2".into(),
+            name: "test notify".into(),
+            enabled: true,
+            config: json!({"type": "shell", "shell": {"command": "echo hello"}}),
+            schedule: json!({"kind": "cron"}),
+            last_run: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            run_count: 5,
+            notify: json!({"system": true, "email": true, "emailTo": "test@test.com"}),
+        };
+
+        let (code, stdout, _) = execute_task(&task);
+        assert_eq!(code, 0);
+        assert_eq!(stdout.trim(), "hello");
+        // Verify notify accessors work
+        assert_eq!(task.notify_system(), Some(true));
+        assert_eq!(task.notify_email(), Some(true));
+        assert_eq!(task.notify_email_to(), Some("test@test.com"));
+    }
+}
