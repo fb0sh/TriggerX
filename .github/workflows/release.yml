@@ -56,7 +56,8 @@ jobs:
       - name: Install Linux deps
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-earth.list 2>/dev/null || true
+          sudo apt-get update -qq 2>&1 | grep -v 'Failed to fetch' || true
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
