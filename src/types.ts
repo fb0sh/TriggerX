@@ -65,13 +65,15 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
 
-  /** Per-task notification settings */
-  notifySystem?: boolean;            // system notification on/off
-  notifySystemOnFailureOnly?: boolean;
-  notifyEmail?: boolean;             // email notification on/off
-  notifyEmailTo?: string;            // email recipient
-  notifyEmailOnFailureOnly?: boolean;
-  notifyEmailTemplate?: string;
+  /** Per-task notification settings (JSON blob) */
+  notify?: {
+    system?: boolean;
+    systemOnFailureOnly?: boolean;
+    email?: boolean;
+    emailTo?: string;
+    emailOnFailureOnly?: boolean;
+    emailTemplate?: string;
+  };
 }
 
 /** Global SMTP credentials only — no recipient or content policies */

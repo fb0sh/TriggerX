@@ -103,12 +103,12 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
   );
 
   // Notification (per-task)
-  const [notifySystem, setNotifySystem] = useState(task?.notifySystem ?? true);
-  const [notifySystemOnFailureOnly, setNotifySystemOnFailureOnly] = useState(task?.notifySystemOnFailureOnly ?? false);
-  const [notifyEmail, setNotifyEmail] = useState(!!task?.notifyEmailTo);
-  const [notifyEmailTo, setNotifyEmailTo] = useState(task?.notifyEmailTo ?? '');
-  const [notifyEmailOnFailureOnly, setNotifyEmailOnFailureOnly] = useState(task?.notifyEmailOnFailureOnly ?? false);
-  const [notifyEmailTemplate, setNotifyEmailTemplate] = useState(task?.notifyEmailTemplate ??
+  const [notifySystem, setNotifySystem] = useState(task?.notify?.system ?? true);
+  const [notifySystemOnFailureOnly, setNotifySystemOnFailureOnly] = useState(task?.notify?.systemOnFailureOnly ?? false);
+  const [notifyEmail, setNotifyEmail] = useState(!!task?.notify?.emailTo);
+  const [notifyEmailTo, setNotifyEmailTo] = useState(task?.notify?.emailTo ?? '');
+  const [notifyEmailOnFailureOnly, setNotifyEmailOnFailureOnly] = useState(task?.notify?.emailOnFailureOnly ?? false);
+  const [notifyEmailTemplate, setNotifyEmailTemplate] = useState(task?.notify?.emailTemplate ??
     `Subject: [TriggerX]({{task.status}}) {{task.name}} - 第{{task.runCount}}次执行
 
 ` +
@@ -166,12 +166,14 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
       lastRun: null,
       createdAt: task?.createdAt ?? now,
       updatedAt: now,
-      notifySystem: notifySystem,
-      notifySystemOnFailureOnly: notifySystemOnFailureOnly || undefined,
-      notifyEmail: notifyEmail || undefined,
-      notifyEmailTo: notifyEmailTo.trim() || undefined,
-      notifyEmailOnFailureOnly: notifyEmailOnFailureOnly || undefined,
-      notifyEmailTemplate: notifyEmailTemplate.trim() || undefined,
+      notify: {
+        system: notifySystem,
+        systemOnFailureOnly: notifySystemOnFailureOnly || undefined,
+        email: notifyEmail || undefined,
+        emailTo: notifyEmailTo.trim() || undefined,
+        emailOnFailureOnly: notifyEmailOnFailureOnly || undefined,
+        emailTemplate: notifyEmailTemplate.trim() || undefined,
+      },
     };
   }
 

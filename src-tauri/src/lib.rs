@@ -4,6 +4,7 @@ mod executor;
 mod mailer;
 mod notifier;
 mod scheduler;
+mod template;
 
 use db::Database;
 use std::sync::Arc;
@@ -59,7 +60,7 @@ fn save_settings(db: tauri::State<'_, Arc<Database>>, settings: db::AppSettings)
 fn test_run_task(task: db::Task, db: tauri::State<'_, Arc<Database>>) -> TestRunResult {
     let mut test_result = executor::run_task_test(&task);
 
-    if let Some(ref to) = task.notify_email_to {
+    if let Some(to) = task.notify_email_to() {
         if !to.is_empty() {
             match db.get_settings() {
                 Ok(settings) => match settings.smtp {

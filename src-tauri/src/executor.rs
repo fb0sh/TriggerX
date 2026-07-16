@@ -81,8 +81,8 @@ pub fn persist_and_notify(
         run_result.error.as_deref(), trigger);
 
     // System notification
-    if task.notify_system.unwrap_or(true) {
-        let fail_only = task.notify_system_on_failure_only.unwrap_or(false);
+    if task.notify_system().unwrap_or(true) {
+        let fail_only = task.notify_system_on_failure_only().unwrap_or(false);
         if !fail_only || code != 0 {
             use crate::notifier;
             let _ = notifier::send_notification(app, task, &run_result);
@@ -90,10 +90,10 @@ pub fn persist_and_notify(
     }
 
     // Email notification
-    if task.notify_email.unwrap_or(false) {
-        let fail_only = task.notify_email_on_failure_only.unwrap_or(false);
+    if task.notify_email().unwrap_or(false) {
+        let fail_only = task.notify_email_on_failure_only().unwrap_or(false);
         if !fail_only || code != 0 {
-            if let Some(ref to) = task.notify_email_to {
+            if let Some(to) = task.notify_email_to() {
                 if !to.is_empty() {
                     if let Ok(settings) = db.get_settings() {
                         if let Some(ref smtp) = settings.smtp {
@@ -247,12 +247,7 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
             run_count: 0,
-            notify_system: None,
-            notify_system_on_failure_only: None,
-            notify_email: None,
-            notify_email_to: None,
-            notify_email_on_failure_only: None,
-            notify_email_template: None,
+            notify: json!({}),
         }
     }
 
