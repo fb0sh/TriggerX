@@ -16,7 +16,6 @@ export function SettingsDialog({ onClose }: Props) {
   const [username, setUsername] = useState(s.smtp?.username ?? '');
   const [password, setPassword] = useState(s.smtp?.password ?? '');
   const [from, setFrom] = useState(s.smtp?.from ?? '');
-  const [useTls, setUseTls] = useState(s.smtp?.useTls ?? true);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -31,12 +30,12 @@ export function SettingsDialog({ onClose }: Props) {
     setUsername(s.smtp?.username ?? '');
     setPassword(s.smtp?.password ?? '');
     setFrom(s.smtp?.from ?? '');
-    setUseTls(s.smtp?.useTls ?? true);
+
   }, [s.smtp]);
 
   async function handleSave() {
     const smtp: SmtpConfig | null = showSmtp
-      ? { host, port: parseInt(port) || 587, username, password, from, useTls }
+      ? { host, port: parseInt(port) || 587, username, password, from }
       : null;
 
     await saveSettings({ smtp });
@@ -105,10 +104,7 @@ export function SettingsDialog({ onClose }: Props) {
               </FormControl>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-              <span id="settings-tls-label">使用 TLS</span>
-              <ToggleSwitch aria-labelledby="settings-tls-label" checked={useTls} onClick={() => setUseTls(!useTls)} size="small" />
-            </div>
+
 
             <div style={{ marginBottom: 12 }}>
               <FormControl>

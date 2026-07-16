@@ -232,18 +232,14 @@ fn send_raw_email(smtp: &SmtpConfig, to: &str, subject: &str, body: &str, attach
 
     eprintln!("[triggerx] Building SMTP transport to {}:{}", smtp.host, smtp.port);
     let creds = Credentials::new(smtp.username.clone(), smtp.password.clone());
-    let transport = if smtp.use_tls {
-        SmtpTransport::starttls_relay(&smtp.host)
-    } else {
-        SmtpTransport::relay(&smtp.host)
-    }
-    .map_err(|e| {
-        eprintln!("[triggerx] SMTP relay error: {e}");
-        format!("SMTP relay error: {e}")
-    })?
-    .port(smtp.port)
-    .credentials(creds)
-    .build();
+    let transport = SmtpTransport::relay(&smtp.host)
+        .map_err(|e| {
+            eprintln!("[triggerx] SMTP relay error: {e}");
+            format!("SMTP relay error: {e}")
+        })?
+        .port(smtp.port)
+        .credentials(creds)
+        .build();
 
     eprintln!("[triggerx] Sending email to {to}...");
     match transport.send(&email) {
@@ -275,6 +271,7 @@ mod tests {
             last_run: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            run_count: 0,
             notify_system: None,
             notify_system_on_failure_only: None,
             notify_email: None,

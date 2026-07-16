@@ -42,7 +42,6 @@ pub struct SmtpConfig {
     pub username: String,
     pub password: String,
     pub from: String,
-    pub use_tls: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

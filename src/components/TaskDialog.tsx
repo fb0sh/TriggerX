@@ -1,19 +1,8 @@
 import { useState } from 'react';
-import {
-  Dialog,
-  TextInput,
-  FormControl,
-  Select,
-  Textarea,
-  Button,
-  Label,
-  ToggleSwitch,
-} from '@primer/react';
+import { Dialog, TextInput, FormControl, Select, Textarea, Button, Label, ToggleSwitch } from '@primer/react';
 import { PlayIcon, CheckIcon, XIcon } from '@primer/octicons-react';
 import { useAppStore } from '../store';
-import type {
-  Task, TaskType, Schedule, LanguageRuntime, TestRunResult, RuntimeCheck,
-} from '../types';
+import type { Task, TaskType, Schedule, LanguageRuntime, TestRunResult, RuntimeCheck } from '../types';
 
 interface Props {
   task: Task | null;

@@ -8,11 +8,10 @@ mod scheduler;
 use db::Database;
 use std::sync::Arc;
 use executor::TestRunResult;
-use tauri::Emitter;
 use tauri::{
     menu::{MenuBuilder, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    Manager,
+    Emitter, Manager,
 };
 
 // ---- Tauri Commands ----
@@ -52,18 +51,12 @@ fn get_settings(db: tauri::State<'_, Arc<Database>>) -> Result<db::AppSettings, 
 }
 
 #[tauri::command]
-fn save_settings(
-    db: tauri::State<'_, Arc<Database>>,
-    settings: db::AppSettings,
-) -> Result<(), String> {
+fn save_settings(db: tauri::State<'_, Arc<Database>>, settings: db::AppSettings) -> Result<(), String> {
     db.save_settings(&settings)
 }
 
 #[tauri::command]
-fn test_run_task(
-    task: db::Task,
-    db: tauri::State<'_, Arc<Database>>,
-) -> TestRunResult {
+fn test_run_task(task: db::Task, db: tauri::State<'_, Arc<Database>>) -> TestRunResult {
     let mut test_result = executor::run_task_test(&task);
 
     if let Some(ref to) = task.notify_email_to {
@@ -71,7 +64,6 @@ fn test_run_task(
             match db.get_settings() {
                 Ok(settings) => match settings.smtp {
                     Some(ref smtp) => {
-                        // Build a RunResult from the test result so send_email can render the template
                         let run_result = db::RunResult {
                             status: if test_result.exit_code == 0 { "success".into() } else { "failure".into() },
                             exit_code: Some(test_result.exit_code),
@@ -91,87 +83,35 @@ fn test_run_task(
                                 eprintln!("[triggerx] Test email FAILED to send to {to}: {e}");
                             }
                         }
-                    },
-                    None => {
-                        test_result.email_error = Some("SMTP not configured — go to Settings to set up SMTP".into());
                     }
+                    None => test_result.email_error = Some("SMTP not configured".into()),
                 },
-                Err(e) => {
-                    test_result.email_error = Some(format!("Failed to read settings: {e}"));
-                }
+                Err(e) => test_result.email_error = Some(format!("Failed to read settings: {e}")),
             }
         }
     }
-
     test_result
 }
 
+/// Run a task immediately in a background thread. Emits events for frontend.
 #[tauri::command]
 fn run_now(id: String, db: tauri::State<'_, Arc<Database>>, app: tauri::AppHandle) -> Result<(), String> {
     let db_clone = db.inner().clone();
     let app_clone = app.clone();
-    let task_id = id.clone();
-
-    // Emit running state immediately
     let _ = app.emit("task-running", serde_json::json!({"id": &id}));
 
     std::thread::spawn(move || {
-        let task = match db_clone.get_task(&task_id) {
+        let task = match db_clone.get_task(&id) {
             Ok(Some(t)) => t,
-            _ => { let _ = app_clone.emit("task-error", serde_json::json!({"id": &task_id, "error": "Task not found"})); return; }
+            _ => { return; }
         };
-        let now = chrono::Utc::now();
-
         let start = std::time::Instant::now();
         let (code, stdout, stderr) = executor::execute_task(&task);
         let duration = start.elapsed().as_millis() as i64;
 
-        let run_result = db::RunResult {
-            status: if code == 0 { "success".into() } else { "failure".into() },
-            exit_code: Some(code),
-            stdout,
-            stderr,
-            executed_at: now.to_rfc3339(),
-            duration_ms: Some(duration),
-            error: if code != 0 { Some("Exit code non-zero".into()) } else { None },
-        };
-
-        // Persist
-        let mut updated = task.clone();
-        updated.run_count += 1;
-        updated.last_run = Some(serde_json::to_value(&run_result).unwrap_or_default());
-        updated.updated_at = now.to_rfc3339();
-        let _ = db_clone.update_task(&updated);
-        let _ = db_clone.insert_log(&task_id, &run_result.status, run_result.exit_code,
-            &run_result.stdout, &run_result.stderr, &run_result.executed_at,
-            run_result.duration_ms, run_result.error.as_deref(), "manual");
-
-        // Notifications
-        if task.notify_system.unwrap_or(true) {
-            let fail_only = task.notify_system_on_failure_only.unwrap_or(false);
-            if !fail_only || code != 0 {
-                let _ = crate::notifier::send_notification(&app_clone, &task, &run_result);
-            }
-        }
-        if task.notify_email.unwrap_or(false) {
-            let fail_only = task.notify_email_on_failure_only.unwrap_or(false);
-            if !fail_only || code != 0 {
-                if let Some(ref to) = task.notify_email_to {
-                    if !to.is_empty() {
-                        if let Ok(settings) = db_clone.get_settings() {
-                            if let Some(ref smtp) = settings.smtp {
-                                let _ = mailer::send_email(smtp, to, &task, &run_result);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Emit completion
-        let _ = app_clone.emit("task-completed", serde_json::to_value(&run_result).unwrap_or_default());
+        let _ = executor::persist_and_notify(&task, code, stdout, stderr, duration, "manual", &db_clone, &app_clone);
+        let _ = app_clone.emit("task-completed", serde_json::json!({"id": &id}));
     });
-
     Ok(())
 }
 
@@ -192,58 +132,31 @@ pub fn run() {
     let db_path = dirs_db_path();
     eprintln!("[triggerx] DB path: {db_path}");
 
-    let db = Arc::new(
-        Database::new(&db_path).expect("Failed to initialize database"),
-    );
+    let db = Arc::new(Database::new(&db_path).expect("Failed to initialize database"));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(db.clone())
         .invoke_handler(tauri::generate_handler![
-            get_tasks,
-            add_task,
-            update_task,
-            delete_task,
-            toggle_task,
-            get_settings,
-            save_settings,
-            test_run_task,
-            run_now,
-            check_runtimes,
-            get_logs,
+            get_tasks, add_task, update_task, delete_task, toggle_task,
+            get_settings, save_settings, test_run_task, run_now, check_runtimes, get_logs,
         ])
         .setup(move |app| {
             // Tray menu
-            let show = tauri::menu::MenuItemBuilder::with_id("show", "显示窗口")
-                .build(app)?;
-            let quit = tauri::menu::MenuItemBuilder::with_id("quit", "退出 TriggerX")
-                .build(app)?;
-            let separator = PredefinedMenuItem::separator(app)?;
-
-            let menu = MenuBuilder::new(app)
-                .item(&show)
-                .item(&separator)
-                .item(&quit)
-                .build()?;
+            let show = tauri::menu::MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
+            let quit = tauri::menu::MenuItemBuilder::with_id("quit", "退出 TriggerX").build(app)?;
+            let sep = PredefinedMenuItem::separator(app)?;
+            let menu = MenuBuilder::new(app).item(&show).item(&sep).item(&quit).build()?;
 
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .expect("Failed to load tray icon");
 
             let _tray = TrayIconBuilder::new()
-                .icon(tray_icon)
-                .menu(&menu)
-                .tooltip("TriggerX — 任务调度器")
+                .icon(tray_icon).menu(&menu).tooltip("TriggerX — 任务调度器")
                 .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
+                    "show" => { if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); } }
+                    "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
@@ -259,11 +172,9 @@ pub fn run() {
                 });
             }
 
-            // Start scheduler
             let handle = app.handle().clone();
             let db_clone = db.clone();
             scheduler::start_scheduler(db_clone, handle);
-
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -274,9 +185,6 @@ fn dirs_db_path() -> String {
     let dir = dirs::data_dir()
         .map(|d| d.join("triggerx"))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-
     std::fs::create_dir_all(&dir).ok();
-    dir.join("triggerx.db")
-        .to_string_lossy()
-        .to_string()
+    dir.join("triggerx.db").to_string_lossy().to_string()
 }

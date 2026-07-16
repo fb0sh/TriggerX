@@ -1,5 +1,7 @@
+use crate::db::{Database, RunResult};
 use serde::Serialize;
 use std::process::Command;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +39,74 @@ pub fn run_task_test(task: &crate::db::Task) -> TestRunResult {
         email_sent: false,
         email_error: None,
     }
+}
+
+/// Persist execution result, insert log, and send notifications.
+/// Shared by tick() and run_now() to eliminate code duplication.
+pub fn persist_and_notify(
+    task: &crate::db::Task,
+    code: i32,
+    stdout: String,
+    stderr: String,
+    duration_ms: i64,
+    trigger: &str,
+    db: &Database,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    use chrono::Utc;
+    let now = Utc::now();
+
+    let run_result = RunResult {
+        status: if code == 0 { "success".into() } else { "failure".into() },
+        exit_code: Some(code),
+        stdout,
+        stderr,
+        executed_at: now.to_rfc3339(),
+        duration_ms: Some(duration_ms),
+        error: if code != 0 { Some("Exit code non-zero".into()) } else { None },
+    };
+
+    // Persist result
+    let mut updated = task.clone();
+    updated.run_count += 1;
+    updated.last_run = Some(serde_json::to_value(&run_result).unwrap_or_default());
+    updated.updated_at = now.to_rfc3339();
+    db.update_task(&updated)?;
+
+    // Insert log
+    let _ = db.insert_log(
+        &task.id, &run_result.status, run_result.exit_code,
+        &run_result.stdout, &run_result.stderr,
+        &run_result.executed_at, run_result.duration_ms,
+        run_result.error.as_deref(), trigger);
+
+    // System notification
+    if task.notify_system.unwrap_or(true) {
+        let fail_only = task.notify_system_on_failure_only.unwrap_or(false);
+        if !fail_only || code != 0 {
+            use crate::notifier;
+            let _ = notifier::send_notification(app, task, &run_result);
+        }
+    }
+
+    // Email notification
+    if task.notify_email.unwrap_or(false) {
+        let fail_only = task.notify_email_on_failure_only.unwrap_or(false);
+        if !fail_only || code != 0 {
+            if let Some(ref to) = task.notify_email_to {
+                if !to.is_empty() {
+                    if let Ok(settings) = db.get_settings() {
+                        if let Some(ref smtp) = settings.smtp {
+                            use crate::mailer;
+                            let _ = mailer::send_email(smtp, to, task, &run_result);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Check which language runtimes are available on this machine.
@@ -176,6 +246,7 @@ mod tests {
             last_run: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            run_count: 0,
             notify_system: None,
             notify_system_on_failure_only: None,
             notify_email: None,

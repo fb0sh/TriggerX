@@ -321,6 +321,8 @@ export default function App() {
             {filtered.map(task => (
               <ActionList.Item
                 key={task.id}
+                as="div"
+                role="listitem"
                 onSelect={() => {}}
                 style={{
                   padding: '10px 24px',

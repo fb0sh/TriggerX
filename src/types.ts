@@ -81,7 +81,6 @@ export interface SmtpConfig {
   username: string;
   password: string;
   from: string;
-  useTls: boolean;
 }
 
 export interface AppSettings {

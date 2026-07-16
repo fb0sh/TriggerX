@@ -86,6 +86,7 @@ mod tests {
             last_run: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            run_count: 0,
             notify_system: None,
             notify_system_on_failure_only: None,
             notify_email: None,
