@@ -1,8 +1,11 @@
 import { useState } from 'react';
-import { Dialog, TextInput, FormControl, Select, Textarea, Button, Label, ToggleSwitch } from '@primer/react';
+import { Dialog, TextInput, FormControl, Select, Textarea, Button, ToggleSwitch } from '@primer/react';
 import { PlayIcon, CheckIcon, XIcon } from '@primer/octicons-react';
+import { CommandForm } from './CommandForm';
+import { LanguageForm } from './LanguageForm';
+import { ShellForm } from './ShellForm';
 import { useAppStore } from '../store';
-import type { Task, TaskType, Schedule, LanguageRuntime, TestRunResult, RuntimeCheck } from '../types';
+import type { Task, TaskType, Schedule, LanguageRuntime, TestRunResult } from '../types';
 
 interface Props {
   task: Task | null;
@@ -24,12 +27,7 @@ const cronPresets = [
   { value: 'custom', label: '自定义 Cron' },
 ];
 
-const languageOptions: { value: LanguageRuntime; label: string }[] = [
-  { value: 'javascript', label: 'JavaScript' },
-  { value: 'python', label: 'Python' },
-  { value: 'shell', label: 'Shell' },
-  { value: 'rust', label: 'Rust' },
-];
+
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -131,8 +129,7 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
   const [testing, setTesting] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   // REPL check
-  const [runtimeCheck, setRuntimeCheck] = useState<RuntimeCheck | null>(null);
-  const [checkingRuntime, setCheckingRuntime] = useState(false);
+
 
   const [error, setError] = useState<string | null>(null);
   const isEditing = !!task;
@@ -216,18 +213,7 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
     }
   }
 
-  async function checkRuntimes() {
-    setCheckingRuntime(true);
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const result = await invoke<RuntimeCheck>('check_runtimes');
-      setRuntimeCheck(result);
-    } catch {
-      setRuntimeCheck({ javascript: true, python: true, rust: false, shell: true });
-    } finally {
-      setCheckingRuntime(false);
-    }
-  }
+
 
   async function handleSave() {
     setError(null);
@@ -237,8 +223,6 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
     else await addTask(t);
     onSaved();
   }
-
-  const runtimeUnavailable = taskType === 'language' && runtimeCheck && !runtimeCheck[language];
 
   return (
     <Dialog
@@ -294,187 +278,28 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
         {/* ===== Shell ===== */}
         {taskType === 'shell' && (
           <div style={{ marginBottom: 16 }}>
-            <FormControl>
-              <FormControl.Label>Shell 命令</FormControl.Label>
-              <Textarea
-                value={shellCommand}
-                onChange={e => setShellCommand(e.target.value)}
-                placeholder="ls -la /tmp"
-                rows={3}
-                block
-                autoCapitalize="none"
-                autoCorrect="off"
-              />
-            </FormControl>
+            <ShellForm value={{ command: shellCommand }} onChange={v => setShellCommand(v.command)} />
           </div>
         )}
 
         {/* ===== 命令行工具 ===== */}
         {taskType === 'command' && (
-          <>
-            <div style={{ marginBottom: 16 }}>
-              <FormControl>
-                <FormControl.Label>命令</FormControl.Label>
-                <TextInput autoCapitalize="none" autoCorrect="off" 
-                  value={cmdBase}
-                  onChange={e => setCmdBase(e.target.value)}
-                  placeholder="pg_dump"
-                  block
-                />
-              </FormControl>
-            </div>
-
-            <div style={{ marginBottom: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fgColor-muted, #656d76)' }}>
-                参数
-              </span>
-            </div>
-
-            {/* Header */}
-            <div style={{
-              display: 'grid', gridTemplateColumns: '1fr 1fr 32px', gap: 8, marginBottom: 4,
-              fontSize: 11, fontWeight: 600, color: 'var(--fgColor-muted, #656d76)', padding: '0 4px',
-            }}>
-              <span>选项（flag）</span>
-              <span>值（value）</span>
-              <span />
-            </div>
-
-            {cmdParams.map((p, i) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 32px', gap: 8, marginBottom: 6 }}>
-                <TextInput autoCapitalize="none" autoCorrect="off" 
-                  value={p.flag}
-                  onChange={e => {
-                    const next = [...cmdParams];
-                    next[i] = { ...next[i], flag: e.target.value };
-                    setCmdParams(next);
-                  }}
-                  placeholder="--host"
-                  size="small"
-                />
-                <TextInput autoCapitalize="none" autoCorrect="off" 
-                  value={p.value}
-                  onChange={e => {
-                    const next = [...cmdParams];
-                    next[i] = { ...next[i], value: e.target.value };
-                    setCmdParams(next);
-                  }}
-                  placeholder="localhost"
-                  size="small"
-                />
-                <Button
-                  size="small"
-                  variant="invisible"
-                  onClick={() => setCmdParams(cmdParams.filter((_, j) => j !== i))}
-                  disabled={cmdParams.length <= 1}
-                >
-                  ✕
-                </Button>
-              </div>
-            ))}
-
-            <div style={{ marginBottom: 12 }}>
-              <Button
-                size="small"
-                variant="invisible"
-                onClick={() => setCmdParams([...cmdParams, { flag: '', value: '' }])}
-              >
-                + 添加参数
-              </Button>
-            </div>
-
-            {/* Preview */}
-            {cmdBase.trim() && (
-              <div style={{
-                padding: '8px 12px', marginBottom: 12, borderRadius: 6,
-                backgroundColor: 'var(--bgColor-muted, #f6f8fa)',
-                fontSize: 12, fontFamily: 'monospace',
-                color: 'var(--fgColor-muted, #656d76)',
-              }}>
-                <span style={{ fontWeight: 600, color: 'var(--fgColor-default)' }}>$</span>{' '}
-                {cmdBase}{' '}
-                {cmdParams.filter(p => p.flag.trim()).map((p, i) => (
-                  <span key={i}>
-                    <span style={{ color: 'var(--fgColor-accent, #0969da)' }}>{p.flag}</span>
-                    {p.value && <span> <span style={{ color: 'var(--fgColor-success, #1a7f37)' }}>{p.value}</span></span>}{' '}
-                  </span>
-                ))}
-              </div>
-            )}
-          </>
+          <div style={{ marginBottom: 16 }}>
+            <CommandForm
+              value={{ base: cmdBase, params: cmdParams }}
+              onChange={v => { setCmdBase(v.base); setCmdParams(v.params); }}
+            />
+          </div>
         )}
 
         {/* ===== 代码片段 ===== */}
         {taskType === 'language' && (
-          <>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
-                <FormControl>
-                  <FormControl.Label>语言</FormControl.Label>
-                  <Select
-                    value={language}
-                    onChange={e => {
-                      setLanguage(e.target.value as LanguageRuntime);
-                      setTestResult(null);
-                    }}
-                  >
-                    {languageOptions.map(opt => (
-                      <Select.Option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </FormControl>
-              </div>
-              <Button
-                size="small"
-                variant="invisible"
-                onClick={checkRuntimes}
-                disabled={checkingRuntime}
-              >
-                {checkingRuntime ? '检测中…' : '检测环境'}
-              </Button>
-            </div>
-
-            {runtimeCheck && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-                {languageOptions.map(opt => (
-                  <Label
-                    key={opt.value}
-                    variant={runtimeCheck[opt.value] ? 'success' : 'danger'}
-                    size="small"
-                  >
-                    {opt.label}: {runtimeCheck[opt.value] ? '✓' : '✗'}
-                  </Label>
-                ))}
-              </div>
-            )}
-
-            {runtimeUnavailable && (
-              <div style={{
-                padding: '8px 12px', marginBottom: 12, borderRadius: 6,
-                backgroundColor: 'var(--bgColor-attention-muted, #fff8c5)',
-                color: 'var(--fgColor-attention, #9a6700)', fontSize: 13,
-              }}>
-                当前环境下 <strong>{language}</strong> 的运行时不可用，执行可能会失败
-              </div>
-            )}
-
-            <div style={{ marginBottom: 16 }}>
-              <FormControl>
-                <FormControl.Label>代码</FormControl.Label>
-                <Textarea
-                  value={code}
-                  onChange={e => setCode(e.target.value)}
-                  placeholder="// 在此编写代码"
-                  rows={8}
-                  block
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                />
-              </FormControl>
-            </div>
-          </>
+          <div style={{ marginBottom: 16 }}>
+            <LanguageForm
+              value={{ language, code }}
+              onChange={(v: { language: string; code: string }) => { setLanguage(v.language as any); setCode(v.code); setTestResult(null); }}
+            />
+          </div>
         )}
 
         {/* ===== 调度 ===== */}

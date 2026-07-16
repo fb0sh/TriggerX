@@ -1,7 +1,6 @@
 use crate::db::{Database, RunResult};
 use serde::Serialize;
 use std::process::Command;
-use std::sync::Arc;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

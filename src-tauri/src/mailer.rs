@@ -1,6 +1,5 @@
 use crate::db::{RunResult, SmtpConfig};
 use lettre::message::header::{ContentDisposition, ContentType};
-use lettre::message::SinglePart;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
 
