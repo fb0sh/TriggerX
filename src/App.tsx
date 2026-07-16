@@ -87,11 +87,18 @@ export default function App() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<Task | null>(null);
   const [expandedOutput, setExpandedOutput] = useState<Set<string>>(new Set());
+  const [appVersion, setAppVersion] = useState('0.2.0');
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     loadTasks();
     loadSettings();
+    (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        setAppVersion(await invoke<string>('get_version'));
+      } catch { /* use default */ }
+    })();
   }, [loadTasks, loadSettings]);
 
   // Compute next run times for all tasks, refresh every 15s
@@ -274,7 +281,7 @@ export default function App() {
         <PageHeader.TitleArea>
           <PageHeader.Title>
             <span style={{ fontWeight: 600, fontSize: 20 }}>
-              TriggerX <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--fgColor-muted, #656d76)' }}>v0.2.0</span>
+              TriggerX <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--fgColor-muted, #656d76)' }}>v{appVersion}</span>
             </span>
           </PageHeader.Title>
         </PageHeader.TitleArea>

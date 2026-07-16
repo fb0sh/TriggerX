@@ -175,6 +175,9 @@ async function invoke(command: string, args?: Record<string, any>): Promise<any>
     case 'check_runtimes':
       return { javascript: true, python: true, rust: true, shell: true };
 
+    case 'get_version':
+      return '0.2.0';
+
     case 'get_cron_times': {
       const exp = args!.expression;
       const count = args!.count || 5;
