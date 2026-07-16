@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            arch: arm64
+            runner: macos-14
+
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            arch: x64
+            runner: macos-13
+
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            arch: x64
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            arch: x64
+
+    runs-on: ${{ matrix.runner || matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install musl tools (Linux musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get install -y musl-tools
+
+      - name: PNPM install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build Tauri app
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        run: >
+          cd src-tauri &&
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd src-tauri
+          APP_NAME="TriggerX"
+          BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
+          if [ -d "$BUNDLE_DIR/dmg" ]; then
+            mv $BUNDLE_DIR/dmg/*.dmg "../TriggerX-${{ matrix.arch }}.dmg"
+          elif [ -d "$BUNDLE_DIR/macos" ]; then
+            # Build .app bundle manually if tauri didn't
+            cargo run --release --target ${{ matrix.target }} -- bundle
+            mv $BUNDLE_DIR/macos/*.app "../TriggerX.app"
+            mkdir -p "../TriggerX.app/Contents/MacOS"
+          fi
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd src-tauri
+          BIN="target/${{ matrix.target }}/release/triggerx"
+          chmod +x "$BIN"
+          # Bundle as AppImage or tarball
+          if command -v appimagetool &>/dev/null; then
+            appimagetool "$BIN" "../TriggerX-x86_64.AppImage"
+          else
+            tar czf "../TriggerX-x86_64-unknown-linux-musl.tar.gz" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+          fi
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd src-tauri
+          $BIN = "target/${{ matrix.target }}/release/triggerx.exe"
+          Compress-Archive -Path $BIN -DestinationPath "../TriggerX-x86_64-pc-windows-msvc.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TriggerX-${{ matrix.target }}
+          path: |
+            TriggerX-*.dmg
+            TriggerX-*.AppImage
+            TriggerX-*.tar.gz
+            TriggerX-*.zip
+          if-no-files-found: ignore
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: TriggerX ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          files: |
+            TriggerX-*/*
