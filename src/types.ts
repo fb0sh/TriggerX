@@ -83,6 +83,8 @@ export interface SmtpConfig {
   username: string;
   password: string;
   from: string;
+  /** TLS mode: 'auto' | 'implicit' | 'starttls' | 'none' */
+  useTls?: string;
 }
 
 export interface AppSettings {
@@ -110,6 +112,7 @@ export interface ExecutionLog {
   durationMs: number | null;
   error: string | null;
   trigger: string;  // "scheduled" | "manual"
+  runCount: number;
 }
 
 export interface RuntimeCheck {

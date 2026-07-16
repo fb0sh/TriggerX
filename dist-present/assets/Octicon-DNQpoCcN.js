@@ -1,0 +1,1 @@
+import{b as i,n as a,j as r}from"./index-CG_HAUra.js";const x=i.forwardRef((n,c)=>{const t=a.c(7);let e,s;t[0]!==n?({icon:e,...s}=n,t[0]=n,t[1]=e,t[2]=s):(e=t[1],s=t[2]);let o;return t[3]!==e||t[4]!==c||t[5]!==s?(o=r.jsx(e,{...s,ref:c}),t[3]=e,t[4]=c,t[5]=s,t[6]=o):o=t[6],o});export{x as O};

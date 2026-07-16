@@ -13,6 +13,7 @@ pub struct Task {
     pub last_run: Option<serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
     pub run_count: i64,
     #[serde(default)]
     pub notify: serde_json::Value, // JSON: { system: bool, systemOnFailureOnly: bool, email: bool, emailTo: string, ... }
@@ -52,6 +53,8 @@ pub struct SmtpConfig {
     pub username: String,
     pub password: String,
     pub from: String,
+    #[serde(default)]
+    pub use_tls: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -79,6 +82,7 @@ pub struct ExecutionLog {
     pub duration_ms: Option<i64>,
     pub error: Option<String>,
     pub trigger: String,
+    pub run_count: i64,
 }
 
 pub struct Database {
@@ -116,7 +120,8 @@ impl Database {
                 executed_at TEXT NOT NULL,
                 duration_ms INTEGER,
                 error TEXT,
-                trigger TEXT NOT NULL DEFAULT 'scheduled'
+                trigger TEXT NOT NULL DEFAULT 'scheduled',
+                run_count INTEGER NOT NULL DEFAULT 0
             );"
         ).map_err(|e| format!("Failed to create tables: {e}"))?;
 
@@ -126,8 +131,18 @@ impl Database {
             .query_map([], |row| row.get::<_, String>(1)).map_err(|e| e.to_string())?
             .filter_map(|r| r.ok()).collect();
 
+        // Migration: add notify column if missing
         if !cols.iter().any(|c| c == "notify") {
             conn.execute("ALTER TABLE tasks ADD COLUMN notify TEXT NOT NULL DEFAULT '{}'", [])
+                .map_err(|e| format!("Migration failed: {e}"))?;
+        }
+        // Migration: add run_count to execution_logs
+        let log_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(execution_logs)").map_err(|e| e.to_string())?
+            .query_map([], |row| row.get::<_, String>(1)).map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok()).collect();
+        if !log_cols.iter().any(|c| c == "run_count") {
+            conn.execute("ALTER TABLE execution_logs ADD COLUMN run_count INTEGER NOT NULL DEFAULT 0", [])
                 .map_err(|e| format!("Migration failed: {e}"))?;
             // Migrate old column data to notify JSON
             if cols.iter().any(|c| c == "notify_system") {
@@ -253,11 +268,11 @@ impl Database {
 
     // ---- Execution Logs ----
 
-    pub fn insert_log(&self, task_id: &str, status: &str, exit_code: Option<i32>, stdout: &str, stderr: &str, executed_at: &str, duration_ms: Option<i64>, error: Option<&str>, trigger: &str) -> Result<(), String> {
+    pub fn insert_log(&self, task_id: &str, status: &str, exit_code: Option<i32>, stdout: &str, stderr: &str, executed_at: &str, duration_ms: Option<i64>, error: Option<&str>, trigger: &str, run_count: i64) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO execution_logs (task_id, status, exit_code, stdout, stderr, executed_at, duration_ms, error, trigger) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-            params![task_id, status, exit_code, stdout, stderr, executed_at, duration_ms, error, trigger],
+            "INSERT INTO execution_logs (task_id, status, exit_code, stdout, stderr, executed_at, duration_ms, error, trigger, run_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![task_id, status, exit_code, stdout, stderr, executed_at, duration_ms, error, trigger, run_count],
         ).map_err(|e| format!("Insert log error: {e}"))?;
         Ok(())
     }
@@ -265,13 +280,14 @@ impl Database {
     pub fn get_logs(&self, task_id: &str, limit: i64) -> Result<Vec<ExecutionLog>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, task_id, status, exit_code, stdout, stderr, executed_at, duration_ms, error, trigger FROM execution_logs WHERE task_id = ?1 ORDER BY executed_at DESC LIMIT ?2"
+            "SELECT id, task_id, status, exit_code, stdout, stderr, executed_at, duration_ms, error, trigger, COALESCE(run_count, 0) FROM execution_logs WHERE task_id = ?1 ORDER BY executed_at DESC LIMIT ?2"
         ).map_err(|e| e.to_string())?;
         let logs = stmt.query_map(params![task_id, limit], |row| {
             Ok(ExecutionLog {
                 id: row.get(0)?, task_id: row.get(1)?, status: row.get(2)?,
                 exit_code: row.get(3)?, stdout: row.get(4)?, stderr: row.get(5)?,
                 executed_at: row.get(6)?, duration_ms: row.get(7)?, error: row.get(8)?, trigger: row.get(9)?,
+                run_count: row.get(10)?,
             })
         }).map_err(|e| e.to_string())?;
         let mut result = Vec::new();

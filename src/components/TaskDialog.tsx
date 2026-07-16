@@ -1,5 +1,8 @@
-import { useState } from 'react';
-import { Dialog, TextInput, FormControl, Select, Textarea, Button, ToggleSwitch } from '@primer/react';
+import { useState, useEffect } from 'react';
+import { Dialog, TextInput, FormControl, Textarea, Button, ToggleSwitch } from '@primer/react';
+import { Cron } from 'react-js-cron';
+import 'react-js-cron/styles.css';
+import { getNextCronTimes } from '../cron-utils';
 import { PlayIcon, CheckIcon, XIcon } from '@primer/octicons-react';
 import { CommandForm } from './CommandForm';
 import { LanguageForm } from './LanguageForm';
@@ -14,20 +17,102 @@ interface Props {
   onSaved: () => void;
 }
 
-const cronPresets = [
-  { value: '*/5 * * * *', label: '每 5 分钟' },
-  { value: '*/15 * * * *', label: '每 15 分钟' },
-  { value: '*/30 * * * *', label: '每 30 分钟' },
-  { value: '0 * * * *', label: '每小时' },
-  { value: '0 */6 * * *', label: '每 6 小时' },
-  { value: '0 0 * * *', label: '每天凌晨' },
-  { value: '0 9 * * *', label: '每天 9:00' },
-  { value: '0 0 * * 1', label: '每周一' },
-  { value: '0 0 1 * *', label: '每月 1 号' },
-  { value: 'custom', label: '自定义 Cron' },
-];
+const cronLocale = {
+  everyText: '每',
+  emptyMonths: '每月',
+  emptyMonthDays: '每日',
+  emptyMonthDaysShort: '每日',
+  emptyWeekDays: '每周',
+  emptyWeekDaysShort: '每周',
+  emptyHours: '每小时',
+  emptyMinutes: '每分钟',
+  emptyMinutesForHourPeriod: '每',
+  yearOption: '每年',
+  monthOption: '每月',
+  weekOption: '每周',
+  dayOption: '每天',
+  hourOption: '每小时',
+  minuteOption: '每分钟',
+  rebootOption: '重启',
+  prefixPeriod: '',
+  prefixMonths: '',
+  prefixMonthDays: '',
+  prefixWeekDays: '',
+  prefixWeekDaysForMonthAndYearPeriod: '',
+  prefixHours: '',
+  prefixMinutes: '',
+  prefixMinutesForHourPeriod: '',
+  suffixMinutesForHourPeriod: '',
+  errorInvalidCron: '无效的 Cron 表达式',
+  clearButtonText: '清除',
+  weekDays: ['日', '一', '二', '三', '四', '五', '六'],
+  months: ['1 月', '2 月', '3 月', '4 月', '5 月', '6 月', '7 月', '8 月', '9 月', '10 月', '11 月', '12 月'],
+  altWeekDays: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
+  altMonths: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+};
 
+/** Describe a cron expression in Chinese. */
+function describeCron(exp: string): string {
+  const p = exp.trim().split(/\s+/);
+  if (p.length !== 5) return '';
+  const [mi, h, dom, mon, dow] = p;
+  const num = (s: string) => /^\d+$/.test(s);
+  const pad = (s: string) => s.padStart(2, '0');
 
+  if (mi === '*' && h === '*' && dom === '*' && mon === '*' && dow === '*') return '每分钟执行';
+
+  const miInt = mi.match(/^\*\/(\d+)$/);
+  if (miInt && h === '*' && dom === '*' && mon === '*' && dow === '*') return `每 ${miInt[1]} 分钟执行`;
+
+  if (num(mi) && h === '*' && dom === '*' && mon === '*' && dow === '*') return `每小时 ${pad(mi)} 分执行`;
+
+  const hInt = h.match(/^\*\/(\d+)$/);
+  if (mi === '0' && hInt && dom === '*' && mon === '*' && dow === '*') return `每 ${hInt[1]} 小时执行`;
+
+  if (mi === '0' && num(h) && dom === '*' && mon === '*') {
+    if (dow === '*') return `每天 ${pad(h)}:00`;
+    if (dow === '1-5') return `工作日 ${pad(h)}:00`;
+    if (dow === '0,6' || dow === '6,0') return `周末 ${pad(h)}:00`;
+    if (num(dow)) {
+      const names = ['日', '一', '二', '三', '四', '五', '六'];
+      const d = parseInt(dow);
+      if (d >= 0 && d <= 6) return `每周${names[d]} ${pad(h)}:00`;
+    }
+  }
+
+  if (mi === '0' && h === '0' && num(dom) && mon === '*' && dow === '*') return `每月 ${dom} 号 00:00`;
+
+  return `Cron: ${exp}`;
+}
+
+/** Show cron description + next 5 execution times. */
+function CronPreview({ expression }: { expression: string }) {
+  const [times, setTimes] = useState<{ iso: string; display: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!expression.trim()) return;
+    let cancelled = false;
+    setLoading(true);
+    getNextCronTimes(expression, 5).then(t => { if (!cancelled) setTimes(t); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [expression]);
+
+  return (
+    <div style={{ fontSize: 13, color: 'var(--fgColor-muted, #656d76)', marginBottom: 12, padding: '6px 10px', background: 'var(--bgColor-muted, #f6f8fa)', borderRadius: 6 }}>
+      <div style={{ marginBottom: times.length > 0 ? 6 : 0 }}>{describeCron(expression)}</div>
+      {loading && <div style={{ fontSize: 11 }}>计算中...</div>}
+      {!loading && times.length > 0 && (
+        <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+          <span style={{ fontWeight: 600 }}>近 5 次执行:</span>
+          {times.map((t, i) => (
+            <div key={i} style={{ paddingLeft: 12 }}>{t.display}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -87,11 +172,9 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
   );
 
   // Cron
-  const initialCron = task?.schedule.kind === 'cron' ? (task.schedule as any).expression : '*/5 * * * *';
-  const [cronPreset, setCronPreset] = useState(
-    cronPresets.find(p => p.value === initialCron)?.value ?? 'custom',
+  const [cronValue, setCronValue] = useState(
+    task?.schedule.kind === 'cron' ? (task.schedule as any).expression : '*/5 * * * *',
   );
-  const [cronCustom, setCronCustom] = useState(initialCron);
 
   // Once
   const [onceDatetime, setOnceDatetime] = useState(
@@ -107,15 +190,15 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
   const [notifyEmailTo, setNotifyEmailTo] = useState(task?.notify?.emailTo ?? '');
   const [notifyEmailOnFailureOnly, setNotifyEmailOnFailureOnly] = useState(task?.notify?.emailOnFailureOnly ?? false);
   const [notifyEmailTemplate, setNotifyEmailTemplate] = useState(task?.notify?.emailTemplate ??
-    `Subject: [TriggerX]({{task.status}}) {{task.name}} - 第{{task.runCount}}次执行
+    `Subject: [TriggerX] {{task.name}} {{task.statusText}} (#{{task.runCount}})
 
 ` +
     `任务: {{task.name}}
-状态: {{task.status}}
+状态: {{task.statusText}}
 退出码: {{task.exitCode}}
 耗时: {{task.duration}}ms
 执行次数: {{task.runCount}}
-执行时间: {{task.executedAt}}
+执行时间: {{task.executedAtLocal}}
 
 --- STDOUT ---
 {{task.stdout}}
@@ -139,9 +222,7 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
     if (scheduleKind === 'once') {
       return { kind: 'once', executeAt: new Date(onceDatetime).toISOString() };
     }
-    const expression = cronPreset === 'custom' ? cronCustom : cronPreset;
-    const preset = cronPresets.find(p => p.value === expression);
-    return { kind: 'cron', expression, label: preset?.label ?? expression };
+    return { kind: 'cron', expression: cronValue, label: cronValue };
   }
 
   function buildTaskConfig(): Task['config'] {
@@ -161,6 +242,7 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
       config: buildTaskConfig(),
       schedule: buildSchedule(),
       lastRun: null,
+      runCount: task?.runCount ?? 0,
       createdAt: task?.createdAt ?? now,
       updatedAt: now,
       notify: {
@@ -328,34 +410,35 @@ export function TaskDialog({ task, smtpConfigured = false, onClose, onSaved }: P
         </div>
 
         {scheduleKind === 'cron' ? (
-          <>
-            <div style={{ marginBottom: 16 }}>
+          <div>
+            <div style={{ marginBottom: 8 }}>
+              <Cron
+                value={cronValue}
+                setValue={setCronValue}
+                locale={cronLocale}
+                allowedPeriods={['year', 'month', 'week', 'day', 'hour', 'minute']}
+                humanizeLabels={false}
+                humanizeValue={false}
+                leadingZero
+                clearButton={false}
+              />
+            </div>
+            <div style={{ marginBottom: 8 }}>
               <FormControl>
-                <FormControl.Label>常用周期</FormControl.Label>
-                <Select value={cronPreset} onChange={e => setCronPreset(e.target.value)}>
-                  {cronPresets.map(p => (
-                    <Select.Option key={p.value} value={p.value}>{p.label}</Select.Option>
-                  ))}
-                </Select>
+                <FormControl.Label>Cron 表达式</FormControl.Label>
+                <TextInput
+                  value={cronValue}
+                  onChange={e => setCronValue(e.target.value)}
+                  placeholder="*/5 * * * *"
+                  block
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  size="small"
+                />
               </FormControl>
             </div>
-            {cronPreset === 'custom' && (
-              <div style={{ marginBottom: 16 }}>
-                <FormControl>
-                  <FormControl.Label>Cron 表达式</FormControl.Label>
-                  <TextInput autoCapitalize="none" autoCorrect="off" 
-                    value={cronCustom}
-                    onChange={e => setCronCustom(e.target.value)}
-                    placeholder="*/5 * * * *"
-                    block
-                  />
-                </FormControl>
-                <span style={{ fontSize: 12, color: 'var(--fgColor-muted, #656d76)' }}>
-                  分 时 日 月 周 · 例: <code>0 9 * * 1</code> = 每周一 9:00
-                </span>
-              </div>
-            )}
-          </>
+            <CronPreview expression={cronValue} />
+          </div>
         ) : (
           <div style={{ marginBottom: 16 }}>
             <FormControl>

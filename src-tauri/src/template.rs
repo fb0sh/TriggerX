@@ -1,13 +1,33 @@
 use crate::db::RunResult;
+use chrono::Locale;
+
+/// Chinese status text.
+fn status_cn(status: &str) -> String {
+    match status {
+        "success" => "执行成功".into(),
+        "failure" => "执行失败".into(),
+        _ => status.to_string(),
+    }
+}
+
+/// Format an ISO datetime string to Chinese-localized datetime.
+fn fmt_local(iso: &str) -> String {
+    match iso.parse::<chrono::DateTime<chrono::FixedOffset>>() {
+        Ok(dt) => dt.with_timezone(&chrono::Local)
+            .format_localized("%Y年%m月%d日 %H:%M:%S", Locale::zh_CN)
+            .to_string(),
+        Err(_) => iso.to_string(),
+    }
+}
 
 /// Replace variables in a template string.
 pub fn render_template_vars(tmpl: &str, task: &crate::db::Task, result: &RunResult) -> String {
     let mut out = tmpl.to_string();
     let now = chrono::Local::now();
     for (k, v) in &[
-        ("{{!date}}", now.format("%Y-%m-%d").to_string()),
-        ("{{!time}}", now.format("%H:%M:%S").to_string()),
-        ("{{!datetime}}", now.format("%Y-%m-%d %H:%M:%S").to_string()),
+        ("{{!date}}", now.format_localized("%Y年%m月%d日", Locale::zh_CN).to_string()),
+        ("{{!time}}", now.format_localized("%H:%M:%S", Locale::zh_CN).to_string()),
+        ("{{!datetime}}", now.format_localized("%Y年%m月%d日 %H:%M:%S", Locale::zh_CN).to_string()),
         ("{{!timestamp}}", now.timestamp().to_string()),
     ] { out = out.replace(k, v); }
 
@@ -15,10 +35,12 @@ pub fn render_template_vars(tmpl: &str, task: &crate::db::Task, result: &RunResu
     for (k, v) in &[
         ("{{task.name}}", task.name.clone()),
         ("{{task.status}}", result.status.clone()),
+        ("{{task.statusText}}", status_cn(&result.status)),
         ("{{task.exitCode}}", result.exit_code.map_or("-".into(), |c| c.to_string())),
         ("{{task.duration}}", result.duration_ms.unwrap_or(0).to_string()),
         ("{{task.runCount}}", task.run_count.to_string()),
         ("{{task.executedAt}}", result.executed_at.clone()),
+        ("{{task.executedAtLocal}}", fmt_local(&result.executed_at)),
         ("{{task.stdout}}", result.stdout.clone()),
         ("{{task.stderr}}", result.stderr.clone()),
     ] { out = out.replace(k, v); }
@@ -97,6 +119,8 @@ pub fn build_email_body(task: &crate::db::Task, result: &RunResult) -> String {
     let stdout_safe = result.stdout.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
     let stderr_safe = result.stderr.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
 
+    let dt_local = fmt_local(&result.executed_at);
+    let s_cn = status_cn(&result.status);
     let header = format!(
         r##"<div style="border-radius:8px;border:1px solid #d0d7de;overflow:hidden">
 <div style="padding:16px 24px;background:{};border-bottom:1px solid #d0d7de">
@@ -112,9 +136,9 @@ pub fn build_email_body(task: &crate::db::Task, result: &RunResult) -> String {
 </table>
 "##,
         if result.status == "success" { "#dafbe1" } else { "#ffebe9" },
-        task.name, task.name, result.status,
+        task.name, task.name, s_cn,
         result.exit_code.map_or("-".into(), |c| c.to_string()),
-        result.duration_ms.unwrap_or(0), result.executed_at,
+        result.duration_ms.unwrap_or(0), dt_local,
     );
 
     let message = if let Some(tmpl) = task.notify_email_template() {

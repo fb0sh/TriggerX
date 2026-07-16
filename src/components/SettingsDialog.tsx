@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Dialog, TextInput, FormControl, Button, ToggleSwitch } from '@primer/react';
+import { Dialog, TextInput, FormControl, Button, ToggleSwitch, Select } from '@primer/react';
 import { useAppStore } from '../store';
 import type { SmtpConfig } from '../types';
 
@@ -16,6 +16,7 @@ export function SettingsDialog({ onClose }: Props) {
   const [username, setUsername] = useState(s.smtp?.username ?? '');
   const [password, setPassword] = useState(s.smtp?.password ?? '');
   const [from, setFrom] = useState(s.smtp?.from ?? '');
+  const [useTls, setUseTls] = useState(s.smtp?.useTls ?? 'auto');
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -30,12 +31,12 @@ export function SettingsDialog({ onClose }: Props) {
     setUsername(s.smtp?.username ?? '');
     setPassword(s.smtp?.password ?? '');
     setFrom(s.smtp?.from ?? '');
-
+    setUseTls(s.smtp?.useTls ?? 'auto');
   }, [s.smtp]);
 
   async function handleSave() {
     const smtp: SmtpConfig | null = showSmtp
-      ? { host, port: parseInt(port) || 587, username, password, from }
+      ? { host, port: parseInt(port) || 587, username, password, from, useTls: useTls === 'auto' ? undefined : useTls }
       : null;
 
     await saveSettings({ smtp });
@@ -110,6 +111,18 @@ export function SettingsDialog({ onClose }: Props) {
               <FormControl>
                 <FormControl.Label>发件地址 (From)</FormControl.Label>
                 <TextInput autoCapitalize="none" autoCorrect="off" value={from} onChange={e => setFrom(e.target.value)} placeholder="triggerx@example.com" size="small" />
+              </FormControl>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <FormControl>
+                <FormControl.Label>TLS 加密方式</FormControl.Label>
+                <Select value={useTls} onChange={e => setUseTls(e.target.value)}>
+                  <Select.Option value="auto">自动（按端口：465=隐式TLS, 587=STARTTLS）</Select.Option>
+                  <Select.Option value="implicit">隐式 TLS（465/587 都直接加密）</Select.Option>
+                  <Select.Option value="starttls">STARTTLS（先明文后升级）</Select.Option>
+                  <Select.Option value="none">无加密</Select.Option>
+                </Select>
               </FormControl>
             </div>
           </>

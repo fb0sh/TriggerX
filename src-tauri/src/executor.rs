@@ -77,7 +77,7 @@ pub fn persist_and_notify(
         &task.id, &run_result.status, run_result.exit_code,
         &run_result.stdout, &run_result.stderr,
         &run_result.executed_at, run_result.duration_ms,
-        run_result.error.as_deref(), trigger);
+        run_result.error.as_deref(), trigger, updated.run_count);
 
     // System notification
     if task.notify_system().unwrap_or(true) {
@@ -97,7 +97,7 @@ pub fn persist_and_notify(
                     if let Ok(settings) = db.get_settings() {
                         if let Some(ref smtp) = settings.smtp {
                             use crate::mailer;
-                            let _ = mailer::send_email(smtp, to, task, &run_result);
+                            let _ = mailer::send_email(smtp, to, task, &run_result, Some(db));
                         }
                     }
                 }

@@ -38,6 +38,7 @@ export function TaskHistory({ task, onClose }: Props) {
             durationMs: task.lastRun.durationMs,
             error: task.lastRun.error ?? null,
             trigger: 'scheduled',
+            runCount: task.runCount ?? 0,
           }]);
         }
       } finally {
@@ -76,6 +77,9 @@ export function TaskHistory({ task, onClose }: Props) {
                 </StateLabel>
                 <span style={{ fontSize: 12, color: 'var(--fgColor-muted, #656d76)' }}>
                   {formatTime(log.executedAt)}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fgColor-muted, #656d76)' }}>
+                  #{log.runCount}
                 </span>
                 {log.durationMs != null && (
                   <span style={{ fontSize: 12, color: 'var(--fgColor-muted, #656d76)' }}>

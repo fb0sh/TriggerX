@@ -74,7 +74,7 @@ fn test_run_task(task: db::Task, db: tauri::State<'_, Arc<Database>>) -> TestRun
                             duration_ms: Some(test_result.duration_ms),
                             error: test_result.error.clone(),
                         };
-                        match mailer::send_email(smtp, to, &task, &run_result) {
+                        match mailer::send_email(smtp, to, &task, &run_result, Some(db.inner())) {
                             Ok(()) => {
                                 test_result.email_sent = true;
                                 eprintln!("[triggerx] Test email sent to {to}");
@@ -109,6 +109,10 @@ fn run_now(id: String, db: tauri::State<'_, Arc<Database>>, app: tauri::AppHandl
         let start = std::time::Instant::now();
         let (code, stdout, stderr) = executor::execute_task(&task);
         let duration = start.elapsed().as_millis() as i64;
+        eprintln!("[triggerx] --- STDOUT ---\n{}", stdout);
+        if !stderr.is_empty() {
+            eprintln!("[triggerx] --- STDERR ---\n{}", stderr);
+        }
 
         let r = executor::persist_and_notify(&task, code, stdout, stderr, duration, "manual", &db_clone, &app_clone);
         match r { Ok(run_result) => { let _ = app_clone.emit("task-completed", serde_json::to_value(&run_result).unwrap_or_default()); } Err(e) => { eprintln!("[triggerx] run_now error: {e}"); } }
@@ -127,6 +131,31 @@ fn get_logs(db: tauri::State<'_, Arc<Database>>, task_id: String) -> Result<Vec<
     db.get_logs(&task_id, 50)
 }
 
+/// Compute next N occurrences of a cron expression (5 or 6 field).
+#[tauri::command]
+fn get_cron_times(expression: String, count: usize) -> Result<Vec<String>, String> {
+    use cron::Schedule;
+    use std::str::FromStr;
+
+    let normalized = if expression.split_whitespace().count() == 5 {
+        format!("0 {expression}")
+    } else {
+        expression.clone()
+    };
+
+    let schedule = Schedule::from_str(&normalized)
+        .map_err(|e| format!("Invalid cron: {e}"))?;
+
+    let now = chrono::Utc::now();
+    let times: Vec<String> = schedule
+        .after(&now)
+        .take(count)
+        .map(|dt| dt.to_rfc3339())
+        .collect();
+
+    Ok(times)
+}
+
 // ---- App Entry ----
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -142,7 +171,7 @@ pub fn run() {
         .manage(db.clone())
         .invoke_handler(tauri::generate_handler![
             get_tasks, add_task, update_task, delete_task, toggle_task,
-            get_settings, save_settings, test_run_task, run_now, check_runtimes, get_logs,
+            get_settings, save_settings, test_run_task, run_now, check_runtimes, get_logs, get_cron_times,
         ])
         .setup(move |app| {
             // Tray menu

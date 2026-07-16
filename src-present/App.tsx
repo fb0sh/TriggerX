@@ -18,21 +18,23 @@ const styles = `
   .anim-fade-3 { animation: fadeUp 0.5s 0.3s ease both; }
 `;
 
-const VERSION = "v0.1.0";
+const VERSION = "v0.2.0";
 
 /* ─── Features ───────────────────────────────────────────────────────── */
 
 const features = [
   { icon: "⚡", title: "三种任务类型", desc: "Shell 命令 / 命令行工具 (flag 式) / 代码片段 (JS/Python/Rust/Shell)" },
-  { icon: "⏱", title: "灵活调度", desc: "Cron 表达式 + 常用预设 + 一次性延迟执行，启动不补跑错过任务" },
-  { icon: "📧", title: "邮件通知", desc: "SMTP 支持 + 自定义模板 + {{task.*}} 变量 + {{file:path}} 文件附件" },
+  { icon: "⏱", title: "可视化 Cron 编辑器", desc: "react-js-cron 图形化选择周期/日/时/分，支持手写输入，实时显示近5次执行时间" },
+  { icon: "📧", title: "邮件通知", desc: "SMTP 支持 + 自动 TLS 协商 (STARTTLS/隐式TLS 自动降级) + 自定义模板 + {{task.*}} 变量 + {{file:path}} 附件" },
   { icon: "🔔", title: "系统通知", desc: "macOS / Windows / Linux 原生系统通知" },
   { icon: "▶", title: "立即执行", desc: "任意任务随时手动运行，不影响原有 cron/once 调度计划" },
-  { icon: "📋", title: "执行历史", desc: "每次执行持久化到 SQLite，区分定时/手动触发，可查看 stdout/stderr" },
-  { icon: "🎨", title: "GitHub 风格", desc: "Primer Design System + Octicons，深色/浅色模式跟随系统" },
-  { icon: "🖥", title: "跨平台", desc: "macOS (ARM) / Windows (x64) / Linux (x64)" },
-  { icon: "🧩", title: "模板变量系统", desc: "{{!date}} 时间变量、{{!command}} Shell 展开、{{file:path}} 附件引用" },
-  { icon: "🔢", title: "执行计数器", desc: "自动追踪每个任务的执行次数，邮件主题和正文都可引用 {{task.runCount}}" },
+  { icon: "📋", title: "执行历史", desc: "每次执行持久化到 SQLite，区分定时/手动触发，带 #N 编号，可查看 stdout/stderr" },
+  { icon: "🎨", title: "GitHub 风格", desc: "Primer Design System + Octicons + antd Cron 组件，深色/浅色模式" },
+  { icon: "🖥", title: "跨平台", desc: "macOS (ARM) / Windows (x64) / Linux (x64)，纯 Rust TLS 无系统依赖" },
+  { icon: "🧩", title: "模板变量系统", desc: "{{!date}} 时间变量、{{!command}} Shell 展开、{{file:path}} 附件引用、{{task.statusText}} 中文状态" },
+  { icon: "🔢", title: "执行计数器", desc: "自动追踪每个任务的执行次数，邮件主题和列表显示 #N" },
+  { icon: "🗑", title: "删除确认", desc: "GitHub 风格 Dialog 确认删除，防止误操作" },
+  { icon: "📄", title: "内联输出", desc: "任务列表直接展开查看上次执行 stdout/stderr，无需打开历史对话框" },
 ];
 
 /* ─── Page ───────────────────────────────────────────────────────────── */

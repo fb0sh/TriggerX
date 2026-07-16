@@ -13,7 +13,7 @@ const mockTasks: Task[] = [
     schedule: { kind: 'cron', expression: '0 */6 * * *', label: '每 6 小时' },
     lastRun: { status: 'success', exitCode: 0, stdout: 'Backup complete (2.3GB)', stderr: '', executedAt: new Date(Date.now() - 3600000).toISOString(), durationMs: 45000 },
     runCount: 128, createdAt: new Date(Date.now() - 86400000 * 30).toISOString(), updatedAt: new Date(Date.now() - 3600000).toISOString(),
-    notify: { system: true, email: true, emailTo: 'admin@example.com', emailTemplate: `Subject: [TriggerX]({{task.status}}) {{task.name}} - 第{{task.runCount}}次执行\n\n任务: {{task.name}}\n状态: {{task.status}}\n退出码: {{task.exitCode}}\n耗时: {{task.duration}}ms\n执行次数: {{task.runCount}}\n执行时间: {{task.executedAt}}`,
+    notify: { system: true, email: true, emailTo: 'admin@example.com', emailTemplate: `Subject: [TriggerX]({{task.status}}) {{task.name}} - 第{{task.runCount}}次执行\n\n任务: {{task.name}}\n状态: {{task.status}}\n退出码: {{task.exitCode}}\n耗时: {{task.duration}}ms\n执行次数: {{task.runCount}}\n执行时间: {{task.executedAt}}` },
   },
   {
     id: '2', name: '健康检查', enabled: true,
@@ -48,12 +48,12 @@ const mockTasks: Task[] = [
   },
 ];
 
-const mockSettings = { smtp: { host: 'smtp.example.com', port: 587, username: 'user@example.com', password: '******', from: 'triggerx@example.com', useTls: true } };
+const mockSettings = { smtp: { host: 'smtp.example.com', port: 587, username: 'user@example.com', password: '******', from: 'triggerx@example.com' } };
 
 let executionLogs: Record<string, any[]> = {};
 let nextLogId = 100;
 
-function addLog(taskId: string, status: string, exitCode: number, stdout: string, stderr: string, trigger: string) {
+function addLog(taskId: string, status: string, exitCode: number, stdout: string, stderr: string, trigger: string, runCount: number = 0) {
   if (!executionLogs[taskId]) executionLogs[taskId] = [];
   executionLogs[taskId].unshift({
     id: nextLogId++, taskId, status, exitCode, stdout, stderr,
@@ -61,6 +61,7 @@ function addLog(taskId: string, status: string, exitCode: number, stdout: string
     durationMs: Math.floor(Math.random() * 50000) + 100,
     error: status === 'failure' ? 'Exit code non-zero' : null,
     trigger,
+    runCount,
   });
 }
 
@@ -79,7 +80,7 @@ setInterval(() => {
         stderr: '', executedAt: new Date().toISOString(), durationMs: Math.floor(Math.random() * 10000) + 500,
       };
       task.runCount = (task.runCount || 0) + 1;
-      addLog(id, 'success', 0, `Output from ${task.name}`, '', 'manual');
+      addLog(id, 'success', 0, `Output from ${task.name}`, '', 'manual', task.runCount);
     }
   }
 }, 2000);
@@ -164,6 +165,7 @@ async function invoke(command: string, args?: Record<string, any>): Promise<any>
             durationMs: Math.floor(Math.random() * 10000) + 100,
             error: i % 3 === 0 ? 'Exit code non-zero' : null,
             trigger: i % 2 === 0 ? 'scheduled' : 'manual',
+            runCount: i + 1,
           });
         }
       }
@@ -172,6 +174,54 @@ async function invoke(command: string, args?: Record<string, any>): Promise<any>
 
     case 'check_runtimes':
       return { javascript: true, python: true, rust: true, shell: true };
+
+    case 'get_cron_times': {
+      const exp = args!.expression;
+      const count = args!.count || 5;
+      const now = new Date();
+      const results: string[] = [];
+      // Simple cron simulator: for presets and basic patterns
+      function nextRun(from: Date): Date | null {
+        const parts = exp.trim().split(/\s+/);
+        if (parts.length !== 5) return null;
+        // Normalize: prepend 0 for seconds
+        parts.unshift('0');
+        const [sec, min, hour, dom, mon, dow] = parts;
+        const d = new Date(from);
+        d.setSeconds(parseInt(sec) || 0);
+        d.setMilliseconds(0);
+        // Try up to 366 days forward
+        for (let day = 0; day < 366; day++) {
+          const test = new Date(d);
+          test.setDate(test.getDate() + day);
+          if (dom !== '*' && test.getDate() !== parseInt(dom)) continue;
+          if (mon !== '*') {
+            const m = parseInt(mon);
+            if (test.getMonth() + 1 !== m && !(mon.startsWith('*/') && (test.getMonth() + 1) % parseInt(mon.slice(2)) === 0)) continue;
+          }
+          if (dow !== '*' && test.getDay() !== parseInt(dow)) continue;
+          // Match hour
+          for (let h = 0; h < 24; h++) {
+            if (hour !== '*' && h !== parseInt(hour) && !(hour.startsWith('*/') && h % parseInt(hour.slice(2)) === 0)) continue;
+            // Match minute
+            for (let m = 0; m < 60; m++) {
+              if (min !== '*' && m !== parseInt(min) && !(min.startsWith('*/') && m % parseInt(min.slice(2)) === 0)) continue;
+              test.setHours(h, m, parseInt(sec) || 0, 0);
+              if (test > from) return test;
+            }
+          }
+        }
+        return null;
+      }
+      let from = now;
+      for (let i = 0; i < count; i++) {
+        const nr = nextRun(from);
+        if (!nr) break;
+        results.push(nr.toISOString());
+        from = new Date(nr.getTime() + 1000);
+      }
+      return results;
+    }
 
     default:
       console.warn('[Mock] Unhandled invoke:', command, args);

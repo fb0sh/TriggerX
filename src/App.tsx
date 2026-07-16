@@ -9,6 +9,7 @@ import {
   Tooltip,
   Spinner,
   IconButton,
+  Dialog,
 } from '@primer/react';
 import {
   PlusIcon,
@@ -27,6 +28,8 @@ const TaskDialog = lazy(() => import('./components/TaskDialog').then(m => ({ def
 const SettingsDialog = lazy(() => import('./components/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
 const TaskHistory = lazy(() => import('./components/TaskHistory').then(m => ({ default: m.TaskHistory })));
 import type { Task, TaskType } from './types';
+import type { CronTime } from './cron-utils';
+import { getNextCronTimes } from './cron-utils';
 
 const typeLabels: Record<TaskType, string> = {
   command: '命令',
@@ -40,16 +43,20 @@ const typeVariants: Record<TaskType, 'default' | 'success' | 'accent'> = {
   language: 'accent',
 };
 
-function schedulePreview(schedule: Task['schedule']): string {
-  if (schedule.kind === 'cron') return schedule.label;
-  const d = new Date(schedule.executeAt);
-  const now = Date.now();
-  const diff = d.getTime() - now;
-  if (diff < 0) return '已过期';
-  if (diff < 60000) return '即将执行';
-  if (diff < 3600000) return `${Math.round(diff / 60000)} 分钟后`;
-  if (diff < 86400000) return `${Math.round(diff / 3600000)} 小时后`;
-  return d.toLocaleDateString('zh-CN');
+function formatDt(d: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function schedulePreview(schedule: Task['schedule'], nextRunCron?: CronTime): string {
+  if (schedule.kind === 'once') {
+    const d = new Date(schedule.executeAt);
+    const diff = d.getTime() - Date.now();
+    if (diff < 0) return `已过期 (${formatDt(d)})`;
+    return formatDt(d);
+  }
+  if (nextRunCron) return nextRunCron.display;
+  return schedule.label;
 }
 
 function relativeTime(iso: string): string {
@@ -76,12 +83,43 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyTask, setHistoryTask] = useState<Task | null>(null);
   const [flashMsg, setFlashMsg] = useState<string | null>(null);
+  const [nextRunTimes, setNextRunTimes] = useState<Record<string, CronTime>>({});
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [deleteConfirm, setDeleteConfirm] = useState<Task | null>(null);
+  const [expandedOutput, setExpandedOutput] = useState<Set<string>>(new Set());
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     loadTasks();
     loadSettings();
   }, [loadTasks, loadSettings]);
+
+  // Compute next run times for all tasks, refresh every 15s
+  useEffect(() => {
+    const cronTasks = tasks.filter(t => t.schedule.kind === 'cron');
+    if (cronTasks.length === 0) {
+      setNextRunTimes({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const map: Record<string, CronTime> = {};
+      for (const t of cronTasks) {
+        if (cancelled) return;
+        if (t.schedule.kind !== 'cron') continue;
+        const times = await getNextCronTimes(t.schedule.expression, 1);
+        if (times.length > 0) map[t.id] = times[0];
+      }
+      if (!cancelled) setNextRunTimes(map);
+    })();
+    return () => { cancelled = true; };
+  }, [tasks, refreshTick]);
+
+  // Refresh every 15 seconds so times stay current
+  useEffect(() => {
+    const id = setInterval(() => setRefreshTick(t => t + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (flashMsg) {
@@ -132,6 +170,7 @@ export default function App() {
 
   async function handleDelete(id: string, name: string) {
     await deleteTask(id);
+    setDeleteConfirm(null);
     setFlashMsg(`已删除「${name}」`);
   }
 
@@ -399,7 +438,8 @@ export default function App() {
                     >
                       <span>
                         <ClockIcon size={14} />{' '}
-                        {schedulePreview(task.schedule)}
+                        {schedulePreview(task.schedule, nextRunTimes[task.id])}
+                        <span style={{ marginLeft: 6, fontWeight: 600 }}>#{(task.runCount ?? 0) + 1}</span>
                       </span>
                       {task.lastRun && (
                         <span>
@@ -415,7 +455,45 @@ export default function App() {
                           )}
                         </span>
                       )}
+                      {task.lastRun && (task.lastRun.stdout || task.lastRun.stderr) && (
+                        <span>
+                          <button
+                            onClick={() => setExpandedOutput(prev => {
+                              const n = new Set(prev);
+                              if (n.has(task.id)) n.delete(task.id); else n.add(task.id);
+                              return n;
+                            })}
+                            style={{
+                              background: 'none', border: 'none', cursor: 'pointer',
+                              fontSize: 11, color: 'var(--fgColor-accent, #0969da)',
+                              padding: 0, marginLeft: 8,
+                            }}
+                          >
+                            {expandedOutput.has(task.id) ? '收起输出' : '查看输出'}
+                          </button>
+                        </span>
+                      )}
                     </div>
+                    {task.lastRun && expandedOutput.has(task.id) && (
+                      <div style={{ marginTop: 6 }}>
+                        {task.lastRun.stdout && (
+                          <pre style={{
+                            margin: '0 0 4px', padding: '6px 10px', borderRadius: 4,
+                            backgroundColor: 'var(--bgColor-muted, #f6f8fa)', fontSize: 11,
+                            fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                            maxHeight: 120, overflow: 'auto',
+                          }}>{task.lastRun.stdout}</pre>
+                        )}
+                        {task.lastRun.stderr && (
+                          <pre style={{
+                            margin: 0, padding: '6px 10px', borderRadius: 4,
+                            backgroundColor: 'var(--bgColor-danger-muted, #ffebe9)', fontSize: 11,
+                            fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                            maxHeight: 120, overflow: 'auto',
+                          }}>{task.lastRun.stderr}</pre>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
@@ -455,7 +533,7 @@ export default function App() {
                         aria-label="删除"
                         variant="invisible"
                         size="small"
-                        onClick={() => handleDelete(task.id, task.name)}
+                        onClick={() => setDeleteConfirm(task)}
                         disabled={runningTasks.has(task.id)}
                       />
                     </Tooltip>
@@ -466,6 +544,36 @@ export default function App() {
           </ActionList>
         )}
       </div>
+
+      {/* Delete confirmation */}
+      {deleteConfirm && (
+        <Dialog
+          title="确认删除"
+          onClose={() => setDeleteConfirm(null)}
+          aria-label="确认删除"
+          width="medium"
+        >
+          <div style={{ padding: 16 }}>
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+              确定要删除任务 <strong>「{deleteConfirm.name}」</strong> 吗？此操作不可撤销。
+            </p>
+          </div>
+          <div style={{
+            display: 'flex', justifyContent: 'flex-end', gap: 8,
+            padding: '12px 16px',
+            borderTop: '1px solid var(--borderColor-muted, #d0d7de)',
+          }}>
+            <Button onClick={() => setDeleteConfirm(null)} size="small">取消</Button>
+            <Button
+              variant="danger"
+              size="small"
+              onClick={() => handleDelete(deleteConfirm.id, deleteConfirm.name)}
+            >
+              确认删除
+            </Button>
+          </div>
+        </Dialog>
+      )}
 
       {/* Dialogs */}
       <Suspense fallback={null}>

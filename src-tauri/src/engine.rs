@@ -17,7 +17,14 @@ pub fn should_run_now(task: &crate::db::Task, now: &chrono::DateTime<Utc>) -> Re
                 .and_then(|v| v.as_str())
                 .ok_or("Missing cron expression")?;
 
-            let cron_schedule = Schedule::from_str(expression)
+            // cron crate expects 6 or 7 fields (sec min hour day mon weekday [year]);
+            // our presets use 5-field Unix cron (min hour day mon weekday).
+            let normalized = if expression.split_whitespace().count() == 5 {
+                format!("0 {expression}")
+            } else {
+                expression.to_string()
+            };
+            let cron_schedule = Schedule::from_str(&normalized)
                 .map_err(|e| format!("Invalid cron '{expression}': {e}"))?;
 
             let check_from = *now - chrono::Duration::seconds(30);
