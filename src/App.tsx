@@ -176,14 +176,37 @@ export default function App() {
 
   async function handleRunNow(id: string) {
     updateRunning(prev => new Set(prev).add(id));
+    const startTime = new Date().toISOString();
+    const taskName = tasks.find(t => t.id === id)?.name || '';
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('run_now', { id });
+
+      // Poll backend for result (background thread persists via DB)
+      let attempts = 0;
+      while (attempts < 120) {
+        await new Promise(r => setTimeout(r, 500));
+        attempts++;
+        try {
+          const tasks: any[] = await invoke('get_tasks');
+          const updated = tasks.find((t: any) => t.id === id);
+          if (updated?.lastRun && new Date(updated.lastRun.executedAt).toISOString() > startTime) {
+            // Update local state
+            useAppStore.setState(s => ({
+              tasks: s.tasks.map(t => t.id === id ? { ...t, lastRun: updated.lastRun } : t)
+            }));
+            setFlashMsg(`「${taskName}」执行完成`);
+            break;
+          }
+        } catch { /* retry */ }
+        if (attempts >= 120) {
+          setFlashMsg(`「${taskName}」执行超时`);
+        }
+      }
     } catch (e) {
-      updateRunning(prev => { const n = new Set(prev); n.delete(id); return n; });
-      const taskName = tasks.find(t => t.id === id)?.name || '';
       setFlashMsg(`「${taskName}」执行失败`);
     }
+    updateRunning(prev => { const n = new Set(prev); n.delete(id); return n; });
   }
 
   return (
