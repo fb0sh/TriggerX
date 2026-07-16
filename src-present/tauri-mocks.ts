@@ -189,5 +189,6 @@ export default { invoke };
 
 export async function isPermissionGranted() { return true; }
 export async function requestPermission() { return 'granted'; }
-export function sendNotification(_opts: any) { console.log('[Mock] Notification:', _opts.title, _opts.body); }
-export default class Notification { static async send(_opts: any) {} }
+export function sendNotification(_opts: any) { console.log('[Mock] Notification:', _opts.title, _opts.body); Notification.send(_opts); }
+const Notification = { async send(_opts: any) {} };
+export { Notification };
