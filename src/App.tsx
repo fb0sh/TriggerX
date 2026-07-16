@@ -274,7 +274,7 @@ export default function App() {
         <PageHeader.TitleArea>
           <PageHeader.Title>
             <span style={{ fontWeight: 600, fontSize: 20 }}>
-              TriggerX <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--fgColor-muted, #656d76)' }}>v0.1.0</span>
+              TriggerX <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--fgColor-muted, #656d76)' }}>v0.2.0</span>
             </span>
           </PageHeader.Title>
         </PageHeader.TitleArea>
