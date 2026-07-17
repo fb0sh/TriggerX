@@ -1,6 +1,6 @@
 [package]
 name = "triggerx"
-version = "0.1.0"
+version = "0.2.1"
 description = "TriggerX - Lightweight Task Scheduler"
 authors = ["you"]
 edition = "2021"

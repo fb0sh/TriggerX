@@ -131,12 +131,6 @@ fn get_logs(db: tauri::State<'_, Arc<Database>>, task_id: String) -> Result<Vec<
     db.get_logs(&task_id, 50)
 }
 
-/// Return the package version from Cargo.toml.
-#[tauri::command]
-fn get_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
 /// Compute next N occurrences of a cron expression (5 or 6 field).
 #[tauri::command]
 fn get_cron_times(expression: String, count: usize) -> Result<Vec<String>, String> {
@@ -176,7 +170,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(db.clone())
         .invoke_handler(tauri::generate_handler![
-            get_version, get_tasks, add_task, update_task, delete_task, toggle_task,
+            get_tasks, add_task, update_task, delete_task, toggle_task,
             get_settings, save_settings, test_run_task, run_now, check_runtimes, get_logs, get_cron_times,
         ])
         .setup(move |app| {

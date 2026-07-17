@@ -18,7 +18,7 @@ const styles = `
   .anim-fade-3 { animation: fadeUp 0.5s 0.3s ease both; }
 `;
 
-const VERSION = "v0.2.0";
+const VERSION = "v0.2.1";
 
 /* ─── Features ───────────────────────────────────────────────────────── */
 

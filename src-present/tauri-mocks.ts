@@ -175,9 +175,6 @@ async function invoke(command: string, args?: Record<string, any>): Promise<any>
     case 'check_runtimes':
       return { javascript: true, python: true, rust: true, shell: true };
 
-    case 'get_version':
-      return '0.2.0';
-
     case 'get_cron_times': {
       const exp = args!.expression;
       const count = args!.count || 5;
@@ -266,6 +263,11 @@ invoke = async function(command: string, args?: Record<string, any>) {
   }
   return result;
 };
+
+/* ─── App API mocks ─────────────────────────────────────────────────── */
+
+export async function getVersion() { return '0.2.1'; }
+export async function getName() { return 'TriggerX'; }
 
 /* ─── Plugin mocks ──────────────────────────────────────────────────── */
 

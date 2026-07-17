@@ -87,7 +87,7 @@ export default function App() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<Task | null>(null);
   const [expandedOutput, setExpandedOutput] = useState<Set<string>>(new Set());
-  const [appVersion, setAppVersion] = useState('0.2.0');
+  const [appVersion, setAppVersion] = useState('0.2.1');
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -95,8 +95,8 @@ export default function App() {
     loadSettings();
     (async () => {
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        setAppVersion(await invoke<string>('get_version'));
+        const { getVersion } = await import('@tauri-apps/api/app');
+        setAppVersion(await getVersion());
       } catch { /* use default */ }
     })();
   }, [loadTasks, loadSettings]);
