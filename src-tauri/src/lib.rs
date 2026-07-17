@@ -3,6 +3,8 @@ mod engine;
 mod executor;
 mod mailer;
 mod notifier;
+mod orchestrator;
+mod runtime;
 mod scheduler;
 mod template;
 
@@ -38,10 +40,9 @@ fn delete_task(db: tauri::State<'_, Arc<Database>>, id: String) -> Result<(), St
 }
 
 #[tauri::command]
-fn toggle_task(db: tauri::State<'_, Arc<Database>>, id: String) -> Result<(), String> {
-    let task = db.get_task(&id)?;
-    match task {
-        Some(t) => db.update_task_enabled(&id, !t.enabled),
+fn toggle_task(db: tauri::State<'_, Arc<Database>>, id: String, enabled: bool) -> Result<(), String> {
+    match db.get_task(&id)? {
+        Some(_) => db.update_task_enabled(&id, enabled),
         None => Err(format!("Task {id} not found")),
     }
 }
@@ -60,37 +61,24 @@ fn save_settings(db: tauri::State<'_, Arc<Database>>, settings: db::AppSettings)
 fn test_run_task(task: db::Task, db: tauri::State<'_, Arc<Database>>) -> TestRunResult {
     let mut test_result = executor::run_task_test(&task);
 
-    if let Some(to) = task.notify_email_to() {
-        if !to.is_empty() {
-            match db.get_settings() {
-                Ok(settings) => match settings.smtp {
-                    Some(ref smtp) => {
-                        let run_result = db::RunResult {
-                            status: if test_result.exit_code == 0 { "success".into() } else { "failure".into() },
-                            exit_code: Some(test_result.exit_code),
-                            stdout: test_result.stdout.clone(),
-                            stderr: test_result.stderr.clone(),
-                            executed_at: chrono::Utc::now().to_rfc3339(),
-                            duration_ms: Some(test_result.duration_ms),
-                            error: test_result.error.clone(),
-                        };
-                        match mailer::send_email(smtp, to, &task, &run_result, Some(db.inner())) {
-                            Ok(()) => {
-                                test_result.email_sent = true;
-                                eprintln!("[triggerx] Test email sent to {to}");
-                            }
-                            Err(e) => {
-                                test_result.email_error = Some(e.clone());
-                                eprintln!("[triggerx] Test email FAILED to send to {to}: {e}");
-                            }
-                        }
-                    }
-                    None => test_result.email_error = Some("SMTP not configured".into()),
-                },
-                Err(e) => test_result.email_error = Some(format!("Failed to read settings: {e}")),
+    // Send email notification via shared helper
+    if task.notify_email().unwrap_or(false) {
+        let run_result = orchestrator::build_run_result(
+            test_result.exit_code,
+            test_result.stdout.clone(),
+            test_result.stderr.clone(),
+            test_result.duration_ms,
+        );
+        match orchestrator::send_email_notification(&task, &run_result, db.inner()) {
+            Ok(()) => {
+                test_result.email_sent = true;
+            }
+            Err(e) => {
+                test_result.email_error = Some(e);
             }
         }
     }
+
     test_result
 }
 
@@ -114,7 +102,7 @@ fn run_now(id: String, db: tauri::State<'_, Arc<Database>>, app: tauri::AppHandl
             eprintln!("[triggerx] --- STDERR ---\n{}", stderr);
         }
 
-        let r = executor::persist_and_notify(&task, code, stdout, stderr, duration, "manual", &db_clone, &app_clone);
+        let r = orchestrator::persist_and_notify(&task, code, stdout, stderr, duration, "manual", &db_clone, Some(&app_clone));
         match r { Ok(run_result) => { let _ = app_clone.emit("task-completed", serde_json::to_value(&run_result).unwrap_or_default()); } Err(e) => { eprintln!("[triggerx] run_now error: {e}"); } }
         
     });
@@ -122,8 +110,8 @@ fn run_now(id: String, db: tauri::State<'_, Arc<Database>>, app: tauri::AppHandl
 }
 
 #[tauri::command]
-fn check_runtimes() -> executor::RuntimeCheck {
-    executor::check_runtimes()
+fn check_runtimes() -> runtime::RuntimeCheck {
+    runtime::check_runtimes()
 }
 
 #[tauri::command]
@@ -137,11 +125,7 @@ fn get_cron_times(expression: String, count: usize) -> Result<Vec<String>, Strin
     use cron::Schedule;
     use std::str::FromStr;
 
-    let normalized = if expression.split_whitespace().count() == 5 {
-        format!("0 {expression}")
-    } else {
-        expression.clone()
-    };
+    let normalized = crate::engine::normalize_cron(&expression);
 
     let schedule = Schedule::from_str(&normalized)
         .map_err(|e| format!("Invalid cron: {e}"))?;

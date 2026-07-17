@@ -1,6 +1,5 @@
 use crate::db::{Database, RunResult};
 use serde::Serialize;
-use std::process::Command;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,15 +11,6 @@ pub struct TestRunResult {
     pub error: Option<String>,
     pub email_sent: bool,
     pub email_error: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeCheck {
-    pub javascript: bool,
-    pub python: bool,
-    pub rust: bool,
-    pub shell: bool,
 }
 
 /// Run a task once (test mode) and return the result without persisting.
@@ -38,99 +28,6 @@ pub fn run_task_test(task: &crate::db::Task) -> TestRunResult {
         email_sent: false,
         email_error: None,
     }
-}
-
-/// Persist execution result, insert log, and send notifications.
-/// Shared by tick() and run_now() to eliminate code duplication.
-pub fn persist_and_notify(
-    task: &crate::db::Task,
-    code: i32,
-    stdout: String,
-    stderr: String,
-    duration_ms: i64,
-    trigger: &str,
-    db: &Database,
-    app: &tauri::AppHandle,
-) -> Result<RunResult, String> {
-    use chrono::Utc;
-    let now = Utc::now();
-
-    let run_result = RunResult {
-        status: if code == 0 { "success".into() } else { "failure".into() },
-        exit_code: Some(code),
-        stdout,
-        stderr,
-        executed_at: now.to_rfc3339(),
-        duration_ms: Some(duration_ms),
-        error: if code != 0 { Some("Exit code non-zero".into()) } else { None },
-    };
-
-    // Persist result
-    let mut updated = task.clone();
-    updated.run_count += 1;
-    updated.last_run = Some(serde_json::to_value(&run_result).unwrap_or_default());
-    updated.updated_at = now.to_rfc3339();
-    db.update_task(&updated)?;
-
-    // Insert log
-    let _ = db.insert_log(
-        &task.id, &run_result.status, run_result.exit_code,
-        &run_result.stdout, &run_result.stderr,
-        &run_result.executed_at, run_result.duration_ms,
-        run_result.error.as_deref(), trigger, updated.run_count);
-
-    // System notification
-    if task.notify_system().unwrap_or(true) {
-        let fail_only = task.notify_system_on_failure_only().unwrap_or(false);
-        if !fail_only || code != 0 {
-            use crate::notifier;
-            let _ = notifier::send_notification(app, task, &run_result);
-        }
-    }
-
-    // Email notification
-    if task.notify_email().unwrap_or(false) {
-        let fail_only = task.notify_email_on_failure_only().unwrap_or(false);
-        if !fail_only || code != 0 {
-            if let Some(to) = task.notify_email_to() {
-                if !to.is_empty() {
-                    if let Ok(settings) = db.get_settings() {
-                        if let Some(ref smtp) = settings.smtp {
-                            use crate::mailer;
-                            let _ = mailer::send_email(smtp, to, task, &run_result, Some(db));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(run_result)
-}
-
-/// Check which language runtimes are available on this machine.
-pub fn check_runtimes() -> RuntimeCheck {
-    RuntimeCheck {
-        javascript: which("node").is_some(),
-        python: which("python3").is_some() || which("python").is_some(),
-        rust: which("rustc").is_some(),
-        shell: true,
-    }
-}
-
-fn which(name: &str) -> Option<String> {
-    let output = if cfg!(target_os = "windows") {
-        Command::new("where").arg(name).output().ok()
-    } else {
-        Command::new("which").arg(name).output().ok()
-    };
-    output.and_then(|o| {
-        if o.status.success() {
-            String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
-        } else {
-            None
-        }
-    })
 }
 
 pub fn execute_task(task: &crate::db::Task) -> (i32, String, String) {
@@ -209,9 +106,9 @@ pub fn execute_task(task: &crate::db::Task) -> (i32, String, String) {
 
 pub fn execute_shell(cmd: &str) -> (i32, String, String) {
     let output = if cfg!(target_os = "windows") {
-        Command::new("cmd").args(["/C", cmd]).output()
+        std::process::Command::new("cmd").args(["/C", cmd]).output()
     } else {
-        Command::new("sh").args(["-c", cmd]).output()
+        std::process::Command::new("sh").args(["-c", cmd]).output()
     };
 
     match output {
@@ -289,12 +186,6 @@ mod tests {
     }
 
     #[test]
-    fn test_check_runtimes_shell_always_available() {
-        let result = check_runtimes();
-        assert!(result.shell);
-    }
-
-    #[test]
     fn test_sh_escape_simple() {
         assert_eq!(sh_escape("hello"), "'hello'");
     }
@@ -317,69 +208,5 @@ mod tests {
         let escaped = sh_escape("a $PATH `cmd` \"quote\"");
         assert!(escaped.starts_with("'"));
         assert!(escaped.ends_with("'"));
-    }
-}
-
-#[cfg(test)]
-mod integration_tests {
-    use super::*;
-    use crate::db::{Database, Task};
-    use serde_json::json;
-    use tauri::AppHandle;
-
-    fn test_db() -> Database {
-        let path = "/tmp/triggerx_test.db";
-        let _ = std::fs::remove_file(path);
-        Database::new(path).unwrap()
-    }
-
-    #[test]
-    fn test_persist_and_notify_returns_result() {
-        let db = test_db();
-        let task = Task {
-            id: "test-persist".into(),
-            name: "test".into(),
-            enabled: true,
-            config: json!({"type": "shell", "shell": {"command": "echo ok"}}),
-            schedule: json!({"kind": "cron"}),
-            last_run: None,
-            created_at: "2026-01-01T00:00:00Z".into(),
-            updated_at: "2026-01-01T00:00:00Z".into(),
-            run_count: 0,
-            notify: json!({"system": true}),
-        };
-        db.add_task(&task).unwrap();
-
-        // Execute a simple command
-        let (code, stdout, _) = execute_task(&task);
-        assert_eq!(code, 0);
-
-        // We can't test persist_and_notify without a real AppHandle in tests
-        // But we can verify execute_task works with the test task
-        assert_eq!(stdout.trim(), "ok");
-    }
-
-    #[test]
-    fn test_execute_task_with_notify_json() {
-        let task = Task {
-            id: "test-2".into(),
-            name: "test notify".into(),
-            enabled: true,
-            config: json!({"type": "shell", "shell": {"command": "echo hello"}}),
-            schedule: json!({"kind": "cron"}),
-            last_run: None,
-            created_at: "2026-01-01T00:00:00Z".into(),
-            updated_at: "2026-01-01T00:00:00Z".into(),
-            run_count: 5,
-            notify: json!({"system": true, "email": true, "emailTo": "test@test.com"}),
-        };
-
-        let (code, stdout, _) = execute_task(&task);
-        assert_eq!(code, 0);
-        assert_eq!(stdout.trim(), "hello");
-        // Verify notify accessors work
-        assert_eq!(task.notify_system(), Some(true));
-        assert_eq!(task.notify_email(), Some(true));
-        assert_eq!(task.notify_email_to(), Some("test@test.com"));
     }
 }

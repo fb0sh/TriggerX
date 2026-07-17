@@ -56,11 +56,7 @@ fn sleep_until_next(db: &Database) {
             }
             "cron" => {
                 if let Some(exp) = schedule.get("expression").and_then(|v| v.as_str()) {
-                    let normalized = if exp.split_whitespace().count() == 5 {
-                        format!("0 {exp}")
-                    } else {
-                        exp.to_string()
-                    };
+                    let normalized = crate::engine::normalize_cron(exp);
                     if let Ok(cron_sched) = Schedule::from_str(&normalized) {
                         // Find the first upcoming occurrence after now
                         for next in cron_sched.after(&now) {
@@ -110,7 +106,7 @@ fn tick(db: &Database, app: &AppHandle) -> Result<(), String> {
             db.update_task_enabled(&task.id, false)?;
         }
 
-        crate::executor::persist_and_notify(task, code, stdout, stderr, duration, "scheduled", db, app)?;
+        crate::orchestrator::persist_and_notify(task, code, stdout, stderr, duration, "scheduled", db, Some(app))?;
     }
     Ok(())
 }

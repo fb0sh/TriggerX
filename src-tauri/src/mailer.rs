@@ -1,17 +1,9 @@
 use crate::db::{RunResult, SmtpConfig};
+use crate::template::status_cn;
 use lettre::message::header::{ContentDisposition, ContentType};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
-
-/// Chinese status text for email display.
-fn status_cn(status: &str) -> String {
-    match status {
-        "success" => "执行成功".into(),
-        "failure" => "执行失败".into(),
-        _ => status.to_string(),
-    }
-}
 
 /// Send email using the configured template or default format.
 /// When `db` is provided and auto-detect finds the correct TLS mode,

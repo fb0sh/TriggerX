@@ -8,7 +8,7 @@ interface Props {
 }
 
 export function SettingsDialog({ onClose }: Props) {
-  const { settings: s, saveSettings, loadSettings } = useAppStore();
+  const { settings: s, saveSettings } = useAppStore();
 
   const [showSmtp, setShowSmtp] = useState(!!s.smtp);
   const [host, setHost] = useState(s.smtp?.host ?? '');
@@ -18,10 +18,6 @@ export function SettingsDialog({ onClose }: Props) {
   const [from, setFrom] = useState(s.smtp?.from ?? '');
   const [useTls, setUseTls] = useState(s.smtp?.useTls ?? 'auto');
   const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
 
   // Sync local state when loaded settings change
   useEffect(() => {

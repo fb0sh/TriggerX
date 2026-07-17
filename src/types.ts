@@ -1,6 +1,6 @@
 export type TaskType = 'command' | 'shell' | 'language';
 export type ScheduleKind = 'cron' | 'once';
-export type RunStatus = 'success' | 'failure' | 'running' | 'pending';
+export type RunStatus = 'success' | 'failure';
 
 /** A single CLI flag + value pair */
 export interface CommandParam {
@@ -23,7 +23,6 @@ export type LanguageRuntime = 'javascript' | 'python' | 'rust' | 'shell';
 export interface LanguageConfig {
   language: LanguageRuntime;
   code: string;
-  runtimeAvailable?: boolean | null;
 }
 
 export type TaskConfig =

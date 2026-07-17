@@ -3,19 +3,15 @@
  * Falls back to JS-side calculation when Tauri is unavailable.
  */
 
+import { getCronTimes } from './ipc';
+import { formatDt } from './utils';
+import type { Schedule } from './types';
+
 export interface CronTime {
   /** ISO 8601 string */
   iso: string;
   /** Formatted display: YYYY-MM-DD HH:mm:ss */
   display: string;
-}
-
-function pad2(n: number): string {
-  return n.toString().padStart(2, '0');
-}
-
-function formatDisplay(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
 /** JS-side cron next-N calculator for basic 5-field patterns. */
@@ -61,7 +57,7 @@ function computeCronJs(expression: string, count: number): CronTime[] {
     if (matchesMon(mo) && matchesDom(d) && matchesDow(cursor.getDay()) && matchesHour(hh) && matchesMin(mm)) {
       results.push({
         iso: cursor.toISOString(),
-        display: formatDisplay(cursor),
+        display: formatDt(cursor),
       });
     }
     cursor.setMinutes(cursor.getMinutes() + 1);
@@ -79,20 +75,57 @@ export async function getNextCronTimes(
 ): Promise<CronTime[]> {
   // Try Tauri backend first
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const isoStrings: string[] = await invoke('get_cron_times', {
-      expression,
-      count,
-    });
+    const isoStrings = await getCronTimes(expression, count);
     return isoStrings.map(iso => ({
       iso,
-      display: (() => {
-        const d = new Date(iso);
-        return formatDisplay(d);
-      })(),
+      display: formatDt(new Date(iso)),
     }));
   } catch {
     // Fallback: JS calculation (works in presentation mode)
     return computeCronJs(expression, count);
   }
+}
+
+/** Describe a 5-field cron expression in Chinese. */
+export function describeCron(exp: string): string {
+  const p = exp.trim().split(/\s+/);
+  if (p.length !== 5) return '';
+  const [mi, h, dom, mon, dow] = p;
+  const num = (s: string) => /^\d+$/.test(s);
+  const pad = (s: string) => s.padStart(2, '0');
+
+  if (mi === '*' && h === '*' && dom === '*' && mon === '*' && dow === '*') return '每分钟执行';
+
+  const miInt = mi.match(/^\*\/(\d+)$/);
+  if (miInt && h === '*' && dom === '*' && mon === '*' && dow === '*') return `每 ${miInt[1]} 分钟执行`;
+
+  if (num(mi) && h === '*' && dom === '*' && mon === '*' && dow === '*') return `每小时 ${pad(mi)} 分执行`;
+
+  const hInt = h.match(/^\*\/(\d+)$/);
+  if (mi === '0' && hInt && dom === '*' && mon === '*' && dow === '*') return `每 ${hInt[1]} 小时执行`;
+
+  if (mi === '0' && num(h) && dom === '*' && mon === '*') {
+    if (dow === '*') return `每天 ${pad(h)}:00`;
+    if (dow === '1-5') return `工作日 ${pad(h)}:00`;
+    if (dow === '0,6' || dow === '6,0') return `周末 ${pad(h)}:00`;
+    if (num(dow)) {
+      const names = ['日', '一', '二', '三', '四', '五', '六'];
+      const d = parseInt(dow);
+      if (d >= 0 && d <= 6) return `每周${names[d]} ${pad(h)}:00`;
+    }
+  }
+
+  if (mi === '0' && h === '0' && num(dom) && mon === '*' && dow === '*') return `每月 ${dom} 号 00:00`;
+
+  return `Cron: ${exp}`;
+}
+
+/** Compute the rough next run timestamp for sorting. */
+export function estimateNextRun(schedule: Schedule): number {
+  if (schedule.kind === 'once') {
+    return new Date(schedule.executeAt).getTime();
+  }
+  const times = computeCronJs(schedule.expression, 1);
+  if (times.length > 0) return new Date(times[0].iso).getTime();
+  return Date.now() + 3600000;
 }

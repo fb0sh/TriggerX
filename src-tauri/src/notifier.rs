@@ -1,11 +1,11 @@
 use crate::db::RunResult;
+use crate::template::status_cn;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 
 /// Send a native OS notification for task execution result.
 pub fn send_notification(app: &AppHandle, task: &crate::db::Task, result: &RunResult) -> Result<(), String> {
-    let title = format!("[TriggerX] {} — {}", task.name,
-        if result.status == "success" { "执行成功" } else { "执行失败" });
+    let title = format!("[TriggerX] {} — {}", task.name, status_cn(&result.status));
 
     let duration = result.duration_ms.unwrap_or(0);
     let duration_str = if duration >= 1000 {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { FormControl, Select, Textarea, Button, Label } from '@primer/react';
+import { checkRuntimes } from '../ipc';
 import type { LanguageConfig, LanguageRuntime, RuntimeCheck } from '../types';
 
 interface Props { value: LanguageConfig; onChange: (v: LanguageConfig) => void; }
@@ -15,11 +16,10 @@ export function LanguageForm({ value, onChange }: Props) {
   const [runtimeCheck, setRuntimeCheck] = useState<RuntimeCheck | null>(null);
   const [checking, setChecking] = useState(false);
 
-  async function checkRuntimes() {
+  async function handleCheckRuntimes() {
     setChecking(true);
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const r = await invoke<RuntimeCheck>('check_runtimes');
+      const r = await checkRuntimes();
       setRuntimeCheck(r);
     } catch { setRuntimeCheck({ javascript: true, python: true, rust: false, shell: true }); }
     finally { setChecking(false); }
@@ -34,7 +34,7 @@ export function LanguageForm({ value, onChange }: Props) {
           {opts.map(o => <Select.Option key={o.value} value={o.value}>{o.label}</Select.Option>)}
         </Select>
       </FormControl>
-      <Button size="small" variant="invisible" onClick={checkRuntimes} disabled={checking}>{checking ? '检测中…' : '检测环境'}</Button>
+      <Button size="small" variant="invisible" onClick={handleCheckRuntimes} disabled={checking}>{checking ? '检测中…' : '检测环境'}</Button>
     </div>
     {runtimeCheck && (
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>

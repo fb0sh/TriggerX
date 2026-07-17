@@ -1,22 +1,12 @@
 import { create } from 'zustand';
-import type { Task, AppSettings } from './types';
-
-// ---- Tauri invoke ----
-async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<T>(cmd, args);
-  } catch {
-    throw new Error('Tauri backend not available');
-  }
-}
+import type { Task, AppSettings, RunResult } from './types';
+import * as ipc from './ipc';
 
 // ---- Store type ----
 interface StoreState {
   tasks: Task[];
   settings: AppSettings;
   loading: boolean;
-  error: string | null;
 
   loadTasks: () => Promise<void>;
   loadSettings: () => Promise<void>;
@@ -25,27 +15,28 @@ interface StoreState {
   deleteTask: (id: string) => Promise<void>;
   toggleTask: (id: string, enabled: boolean) => Promise<void>;
   saveSettings: (settings: AppSettings) => Promise<void>;
+  /** Sync a task's lastRun after backend has persisted it. No IPC needed. */
+  updateTaskResult: (id: string, lastRun: RunResult) => void;
 }
 
 export const useAppStore = create<StoreState>((set) => ({
   tasks: [],
   settings: { smtp: null },
   loading: false,
-  error: null,
 
   loadTasks: async () => {
     set({ loading: true });
     try {
-      const tasks = await tauriInvoke<Task[]>('get_tasks');
+      const tasks = await ipc.getTasks();
       set({ tasks: tasks ?? [], loading: false });
     } catch {
-      set({ tasks: [...mockTasks], loading: false });
+      set({ tasks: [], loading: false });
     }
   },
 
   loadSettings: async () => {
     try {
-      const settings = await tauriInvoke<AppSettings>('get_settings');
+      const settings = await ipc.getSettings();
       set({ settings });
     } catch {
       // dev mode — use defaults
@@ -54,57 +45,71 @@ export const useAppStore = create<StoreState>((set) => ({
 
   addTask: async (task) => {
     set((s) => ({ tasks: [task, ...s.tasks] }));
-    try { await tauriInvoke('add_task', { task }); } catch { /* dev */ }
+    try {
+      await ipc.addTask(task);
+    } catch {
+      // Rollback optimistic update
+      set((s) => ({ tasks: s.tasks.filter(t => t.id !== task.id) }));
+    }
   },
 
   updateTask: async (task) => {
-    set((s) => ({ tasks: s.tasks.map(t => t.id === task.id ? task : t) }));
-    try { await tauriInvoke('update_task', { task }); } catch { /* dev */ }
+    let prev: Task | undefined;
+    set((s) => {
+      prev = s.tasks.find(t => t.id === task.id);
+      return { tasks: s.tasks.map(t => t.id === task.id ? task : t) };
+    });
+    try {
+      await ipc.updateTask(task);
+    } catch {
+      // Rollback
+      if (prev) set((s) => ({ tasks: s.tasks.map(t => t.id === task.id ? prev! : t) }));
+    }
   },
 
   deleteTask: async (id) => {
-    set((s) => ({ tasks: s.tasks.filter(t => t.id !== id) }));
-    try { await tauriInvoke('delete_task', { id }); } catch { /* dev */ }
+    let prev: Task[] = [];
+    set((s) => {
+      prev = s.tasks;
+      return { tasks: s.tasks.filter(t => t.id !== id) };
+    });
+    try {
+      await ipc.deleteTask(id);
+    } catch {
+      // Rollback
+      set({ tasks: prev });
+    }
   },
 
   toggleTask: async (id, enabled) => {
-    set((s) => ({ tasks: s.tasks.map(t => t.id === id ? { ...t, enabled } : t) }));
-    try { await tauriInvoke('toggle_task', { id }); } catch { /* dev */ }
+    let prevEnabled: boolean | undefined;
+    set((s) => {
+      const task = s.tasks.find(t => t.id === id);
+      prevEnabled = task?.enabled;
+      return { tasks: s.tasks.map(t => t.id === id ? { ...t, enabled } : t) };
+    });
+    try {
+      await ipc.toggleTask(id, enabled);
+    } catch {
+      // Rollback
+      if (prevEnabled !== undefined) {
+        set((s) => ({ tasks: s.tasks.map(t => t.id === id ? { ...t, enabled: prevEnabled! } : t) }));
+      }
+    }
   },
 
   saveSettings: async (settings) => {
     set({ settings });
-    try { await tauriInvoke('save_settings', { settings }); } catch { /* dev */ }
+    try {
+      await ipc.saveSettings(settings);
+    } catch {
+      // Settings save failure is non-critical in dev mode
+    }
+  },
+
+  updateTaskResult: (id, lastRun) => {
+    set((s) => ({
+      tasks: s.tasks.map(t => t.id === id ? { ...t, lastRun } : t),
+    }));
   },
 }));
-
-// ---- Mock data ----
-const mockTasks: Task[] = [
-  {
-    id: '1', name: '备份数据库', enabled: true,
-    config: { type: 'shell', shell: { command: 'echo "Backing up database..."; sleep 2; echo "Done (2.3GB)"' } },
-    schedule: { kind: 'cron', expression: '0 */6 * * *', label: '每 6 小时' },
-    lastRun: { status: 'success', exitCode: 0, stdout: 'Done (2.3GB)', stderr: '', executedAt: new Date(Date.now() - 3600000).toISOString(), durationMs: 45000 },
-    createdAt: new Date(Date.now() - 86400000).toISOString(), updatedAt: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: '2', name: '健康检查', enabled: true,
-    config: { type: 'shell', shell: { command: 'curl -sf https://api.example.com/health && echo OK || echo FAIL' } },
-    schedule: { kind: 'cron', expression: '*/5 * * * *', label: '每 5 分钟' },
-    lastRun: { status: 'success', exitCode: 0, stdout: 'OK', stderr: '', executedAt: new Date(Date.now() - 120000).toISOString(), durationMs: 320 },
-    createdAt: new Date(Date.now() - 604800000).toISOString(), updatedAt: new Date(Date.now() - 120000).toISOString(),
-  },
-  {
-    id: '3', name: '清理日志', enabled: false,
-    config: { type: 'shell', shell: { command: 'find /var/log -name "*.log" -mtime +30 -delete' } },
-    schedule: { kind: 'cron', expression: '0 3 * * 0', label: '每周日凌晨 3:00' },
-    lastRun: { status: 'failure', exitCode: 1, stdout: '', stderr: 'Permission denied', executedAt: new Date(Date.now() - 604800000).toISOString(), durationMs: 150 },
-    createdAt: new Date(Date.now() - 1209600000).toISOString(), updatedAt: new Date(Date.now() - 604800000).toISOString(),
-  },
-  {
-    id: '4', name: '生成周报', enabled: true,
-    config: { type: 'language', language: { language: 'javascript', code: 'console.log("Weekly report generated");' } },
-    schedule: { kind: 'once', executeAt: new Date(Date.now() + 7200000).toISOString() },
-    lastRun: null, createdAt: new Date(Date.now() - 300000).toISOString(), updatedAt: new Date(Date.now() - 300000).toISOString(),
-  },
-];

@@ -2,7 +2,7 @@ use crate::db::RunResult;
 use chrono::Locale;
 
 /// Chinese status text.
-fn status_cn(status: &str) -> String {
+pub fn status_cn(status: &str) -> String {
     match status {
         "success" => "执行成功".into(),
         "failure" => "执行失败".into(),
@@ -210,5 +210,70 @@ mod tests {
     #[test] fn test_collect_attachment_paths() {
         let p = collect_attachment_paths("a {{file:/a/b.txt}} c {{file:/d.log}} e");
         assert_eq!(p.len(), 2);
+    }
+
+    // ---- status_cn ----
+
+    #[test]
+    fn test_status_cn_success() {
+        assert_eq!(status_cn("success"), "执行成功");
+    }
+
+    #[test]
+    fn test_status_cn_failure() {
+        assert_eq!(status_cn("failure"), "执行失败");
+    }
+
+    #[test]
+    fn test_status_cn_unknown() {
+        assert_eq!(status_cn("running"), "running");
+    }
+
+    // ---- build_email_body ----
+
+    #[test]
+    fn test_build_email_body_contains_task_name() {
+        let body = build_email_body(&make_task(), &make_result());
+        assert!(body.contains("test-task"));
+    }
+
+    #[test]
+    fn test_build_email_body_contains_status() {
+        let body = build_email_body(&make_task(), &make_result());
+        assert!(body.contains("执行成功"));
+    }
+
+    #[test]
+    fn test_build_email_body_failure_has_danger_bg() {
+        let mut r = make_result();
+        r.status = "failure".into();
+        r.exit_code = Some(1);
+        let body = build_email_body(&make_task(), &r);
+        assert!(body.contains("#ffebe9"));
+    }
+
+    #[test]
+    fn test_build_email_body_stdout_section() {
+        let body = build_email_body(&make_task(), &make_result());
+        assert!(body.contains("STDOUT"));
+        assert!(body.contains("hello world"));
+    }
+
+    #[test]
+    fn test_build_email_body_html_escape() {
+        let mut r = make_result();
+        r.stdout = "<script>alert(1)</script>".into();
+        let body = build_email_body(&make_task(), &r);
+        assert!(!body.contains("<script>"));
+        assert!(body.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn test_build_email_body_with_template() {
+        let mut task = make_task();
+        task.notify = json!({"emailTemplate": "Name: {{task.name}} Status: {{task.status}}"});
+        let body = build_email_body(&task, &make_result());
+        assert!(body.contains("Name: test-task"));
+        assert!(body.contains("Status: success"));
     }
 }

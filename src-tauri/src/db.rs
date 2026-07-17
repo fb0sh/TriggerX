@@ -306,3 +306,186 @@ impl Database {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static DB_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn test_db() -> Database {
+        let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = format!("/tmp/triggerx_db_test_{id}.db");
+        let _ = std::fs::remove_file(&path);
+        Database::new(&path).unwrap()
+    }
+
+    fn make_task(id: &str) -> Task {
+        Task {
+            id: id.into(),
+            name: format!("task-{id}"),
+            enabled: true,
+            config: json!({"type": "shell", "shell": {"command": "echo ok"}}),
+            schedule: json!({"kind": "cron", "expression": "*/5 * * * *"}),
+            last_run: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            run_count: 0,
+            notify: json!({"system": true}),
+        }
+    }
+
+    #[test]
+    fn test_add_and_get_task() {
+        let db = test_db();
+        let task = make_task("t1");
+        db.add_task(&task).unwrap();
+
+        let fetched = db.get_task("t1").unwrap().unwrap();
+        assert_eq!(fetched.id, "t1");
+        assert_eq!(fetched.name, "task-t1");
+        assert!(fetched.enabled);
+    }
+
+    #[test]
+    fn test_get_nonexistent_task() {
+        let db = test_db();
+        assert!(db.get_task("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_all_tasks() {
+        let db = test_db();
+        db.add_task(&make_task("a")).unwrap();
+        db.add_task(&make_task("b")).unwrap();
+        let all = db.get_all_tasks().unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_update_task() {
+        let db = test_db();
+        let mut task = make_task("u1");
+        db.add_task(&task).unwrap();
+
+        task.name = "updated".into();
+        db.update_task(&task).unwrap();
+
+        let fetched = db.get_task("u1").unwrap().unwrap();
+        assert_eq!(fetched.name, "updated");
+    }
+
+    #[test]
+    fn test_update_task_not_found() {
+        let db = test_db();
+        let task = make_task("ghost");
+        assert!(db.update_task(&task).is_err());
+    }
+
+    #[test]
+    fn test_delete_task() {
+        let db = test_db();
+        db.add_task(&make_task("d1")).unwrap();
+        assert!(db.get_task("d1").unwrap().is_some());
+
+        db.delete_task("d1").unwrap();
+        assert!(db.get_task("d1").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_update_task_enabled() {
+        let db = test_db();
+        db.add_task(&make_task("e1")).unwrap();
+
+        db.update_task_enabled("e1", false).unwrap();
+        let task = db.get_task("e1").unwrap().unwrap();
+        assert!(!task.enabled);
+
+        db.update_task_enabled("e1", true).unwrap();
+        let task = db.get_task("e1").unwrap().unwrap();
+        assert!(task.enabled);
+    }
+
+    #[test]
+    fn test_get_enabled_tasks() {
+        let db = test_db();
+        db.add_task(&make_task("en1")).unwrap();
+        let mut disabled = make_task("dis1");
+        disabled.enabled = false;
+        db.add_task(&disabled).unwrap();
+
+        let enabled = db.get_enabled_tasks().unwrap();
+        assert_eq!(enabled.len(), 1);
+        assert_eq!(enabled[0].id, "en1");
+    }
+
+    #[test]
+    fn test_settings_roundtrip() {
+        let db = test_db();
+        let settings = AppSettings {
+            smtp: Some(SmtpConfig {
+                host: "smtp.test.com".into(),
+                port: 587,
+                username: "user".into(),
+                password: "pass".into(),
+                from: "test@test.com".into(),
+                use_tls: Some("starttls".into()),
+            }),
+        };
+        db.save_settings(&settings).unwrap();
+
+        let loaded = db.get_settings().unwrap();
+        assert!(loaded.smtp.is_some());
+        let smtp = loaded.smtp.unwrap();
+        assert_eq!(smtp.host, "smtp.test.com");
+        assert_eq!(smtp.port, 587);
+    }
+
+    #[test]
+    fn test_settings_default() {
+        let db = test_db();
+        let settings = db.get_settings().unwrap();
+        assert!(settings.smtp.is_none());
+    }
+
+    #[test]
+    fn test_insert_and_get_logs() {
+        let db = test_db();
+        db.insert_log("t1", "success", Some(0), "out", "err", "2026-01-01T00:00:00Z", Some(100), None, "scheduled", 1).unwrap();
+        db.insert_log("t1", "failure", Some(1), "", "err2", "2026-01-02T00:00:00Z", Some(50), Some("error"), "manual", 2).unwrap();
+
+        let logs = db.get_logs("t1", 10).unwrap();
+        assert_eq!(logs.len(), 2);
+        // Descending order — latest first
+        assert_eq!(logs[0].status, "failure");
+        assert_eq!(logs[0].run_count, 2);
+        assert_eq!(logs[1].status, "success");
+    }
+
+    #[test]
+    fn test_logs_limit() {
+        let db = test_db();
+        for i in 0..5 {
+            db.insert_log("t1", "success", Some(0), "", "", &format!("2026-01-0{i}T00:00:00Z"), Some(10), None, "scheduled", i).unwrap();
+        }
+        let logs = db.get_logs("t1", 3).unwrap();
+        assert_eq!(logs.len(), 3);
+    }
+
+    #[test]
+    fn test_notify_accessors() {
+        let task = Task {
+            id: "test".into(), name: "test".into(), enabled: true,
+            config: json!({}), schedule: json!({}), last_run: None,
+            created_at: "".into(), updated_at: "".into(), run_count: 0,
+            notify: json!({"system": true, "systemOnFailureOnly": true, "email": true, "emailTo": "a@b.com", "emailOnFailureOnly": true}),
+        };
+        assert_eq!(task.notify_system(), Some(true));
+        assert_eq!(task.notify_system_on_failure_only(), Some(true));
+        assert_eq!(task.notify_email(), Some(true));
+        assert_eq!(task.notify_email_to(), Some("a@b.com"));
+        assert_eq!(task.notify_email_on_failure_only(), Some(true));
+    }
+}
